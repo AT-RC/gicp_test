@@ -1,0 +1,117 @@
+# Copyright 2025 Lihan Chen
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
+
+
+def generate_launch_description():
+    # Map fully qualified names to relative ones so the node's namespace can be prepended.
+    # In case of the transforms (tf), currently, there doesn't seem to be a better alternative
+    # https://github.com/ros/geometry2/issues/32
+    # https://github.com/ros/robot_state_publisher/pull/30
+    # TODO(orduno) Substitute with `PushNodeRemapping`
+    #              https://github.com/ros2/launch_ros/issues/56
+    remappings = [("/tf", "tf"), ("/tf_static", "tf_static")]
+
+    point_lio_dir = get_package_share_directory('point_lio')
+
+    num_threads = LaunchConfiguration("num_threads")
+    num_neighbors = LaunchConfiguration("num_neighbors")
+    global_leaf_size = LaunchConfiguration("global_leaf_size")
+    registered_leaf_size = LaunchConfiguration("registered_leaf_size")
+    max_dist_sq = LaunchConfiguration("max_dist_sq")
+    map_frame = LaunchConfiguration("map_frame")
+    odom_frame = LaunchConfiguration("odom_frame")
+    base_frame = LaunchConfiguration("base_frame")
+    lidar_frame = LaunchConfiguration("lidar_frame")
+    robot_base_frame = LaunchConfiguration("robot_base_frame")
+    prior_pcd_file = LaunchConfiguration("prior_pcd_file")
+
+    declare_num_threads = DeclareLaunchArgument(
+        "num_threads", default_value="4", description="Number of threads"
+    )
+    declare_num_neighbors = DeclareLaunchArgument(
+        "num_neighbors", default_value="10", description="Number of neighbors"
+    )
+    declare_global_leaf_size = DeclareLaunchArgument(
+        "global_leaf_size", default_value="0.25", description="Global leaf size"
+    )
+    declare_registered_leaf_size = DeclareLaunchArgument(
+        "registered_leaf_size", default_value="0.25", description="Registered leaf size"
+    )
+    declare_max_dist_sq = DeclareLaunchArgument(
+        "max_dist_sq", default_value="16.0", description="Max distance squared"
+    )
+    declare_map_frame = DeclareLaunchArgument(
+        "map_frame", default_value="map", description="Map frame"
+    )
+    declare_odom_frame = DeclareLaunchArgument(
+        "odom_frame", default_value="odom", description="Odom frame"
+    )
+    declare_base_frame = DeclareLaunchArgument(
+        "base_frame", default_value="base_link", description="Base frame"
+    )
+    declare_lidar_frame = DeclareLaunchArgument(
+        "lidar_frame", default_value="lidar", description="Lidar frame"
+    )
+    declare_robot_base_frame = DeclareLaunchArgument(
+        "robot_base_frame", default_value="base_link", description="Robot base frame"
+    )
+    declare_prior_pcd_file = DeclareLaunchArgument(
+        "prior_pcd_file", 
+        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "scans.pcd"]), 
+        description="Prior PCD file"
+    )
+
+    node = Node(
+        package="small_gicp_relocalization",
+        executable="small_gicp_relocalization_node",
+        namespace="",
+        output="screen",
+        remappings=remappings,
+        parameters=[
+            {
+                "num_threads": num_threads,
+                "num_neighbors": num_neighbors,
+                "global_leaf_size": global_leaf_size,
+                "registered_leaf_size": registered_leaf_size,
+                "max_dist_sq": max_dist_sq,
+                "map_frame": map_frame,
+                "odom_frame": odom_frame,
+                "base_frame": base_frame,
+                "lidar_frame": lidar_frame,
+                "robot_base_frame": robot_base_frame,
+                "prior_pcd_file": prior_pcd_file,
+            }
+        ],
+    )
+
+    return LaunchDescription([
+        declare_num_threads,
+        declare_num_neighbors,
+        declare_global_leaf_size,
+        declare_registered_leaf_size,
+        declare_max_dist_sq,
+        declare_map_frame,
+        declare_odom_frame,
+        declare_base_frame,
+        declare_lidar_frame,
+        declare_robot_base_frame,
+        declare_prior_pcd_file,
+        node
+    ])

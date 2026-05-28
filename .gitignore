@@ -1,0 +1,12 @@
+# ROS 2 build & install outputs
+build/
+install/
+log/
+
+# Python caching
+__pycache__/
+*.pyc
+
+# IDEs and OS files
+.vscode/
+.DS_Store
