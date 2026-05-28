@@ -292,6 +292,10 @@ void SmallGicpRelocalizationNode::performRegistration()
 
 void SmallGicpRelocalizationNode::publishTransform()
 {
+  if (!global_search_done_) {
+    return;
+  }
+
   Eigen::Isometry3d current_pose;
   {
     std::lock_guard<std::mutex> lock(pose_mutex_);
@@ -497,7 +501,10 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
     std::lock_guard<std::mutex> lock(pose_mutex_);
     previous_result_t_ = result_t_ = best_pose;
     global_search_done_ = true;
-    RCLCPP_INFO(this->get_logger(), "Global search successful! Best score: %f. Time taken: %ld ms", best_score, duration);
+    RCLCPP_INFO(this->get_logger(), "==========================================================");
+    RCLCPP_INFO(this->get_logger(), "★ ★ ★ GLOBAL INITIALIZATION SUCCESSFUL ★ ★ ★");
+    RCLCPP_INFO(this->get_logger(), "Best score: %f. Time taken: %ld ms", best_score, duration);
+    RCLCPP_INFO(this->get_logger(), "==========================================================");
   } else {
     RCLCPP_WARN(this->get_logger(), "Fine search failed to find a valid pose! Retrying next frame...");
   }
