@@ -290,6 +290,7 @@ void SmallGicpRelocalizationNode::performRegistration()
 
     // 恢复连续 GICP 重定位：只有在可信度大于 40 分时才尝试更新地图 TF
     if (confidence > 40.0) {
+      lost_tracking_count_ = 0;
       Eigen::Isometry3d new_pose = result.T_target_source;
       double translation_diff = (new_pose.translation() - previous_result_t_.translation()).norm();
       
@@ -306,11 +307,23 @@ void SmallGicpRelocalizationNode::performRegistration()
         RCLCPP_DEBUG(this->get_logger(), "GICP 误差极小 (%.3f米), 跳过更正，保持 Point-LIO 丝滑轨迹", translation_diff);
       }
     } else {
+      lost_tracking_count_++;
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, 
         "GICP confidence too low (%.1f), skipping continuous TF update to prevent drift.", confidence);
+      if (lost_tracking_count_ > 5) {
+        RCLCPP_ERROR(this->get_logger(), "Tracking lost for too long (confidence low)! Triggering re-initialization...");
+        global_search_done_ = false;
+        lost_tracking_count_ = 0;
+      }
     }
   } else {
+    lost_tracking_count_++;
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "GICP did not converge.");
+    if (lost_tracking_count_ > 5) {
+      RCLCPP_ERROR(this->get_logger(), "Tracking lost for too long (no converge)! Triggering re-initialization...");
+      global_search_done_ = false;
+      lost_tracking_count_ = 0;
+    }
   }
 }
 
@@ -419,15 +432,15 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
   int search_threads = omp_get_max_threads(); // Full CPU for global search
 
   if (!enable_global_search_) {
-    // 1-meter local search around origin (init_pose)
-    double origin_x = init_pose_.empty() ? 0.0 : init_pose_[0];
-    double origin_y = init_pose_.empty() ? 0.0 : init_pose_[1];
-    search_x_min = origin_x - 1.0;
-    search_x_max = origin_x + 1.0;
-    search_y_min = origin_y - 1.0;
-    search_y_max = origin_y + 1.0;
+    // 1-meter local search around last known pose (previous_result_t_)
+    double origin_x = previous_result_t_.translation().x();
+    double origin_y = previous_result_t_.translation().y();
+    search_x_min = origin_x - 2.0;
+    search_x_max = origin_x + 2.0;
+    search_y_min = origin_y - 2.0;
+    search_y_max = origin_y + 2.0;
     search_threads = num_threads_; // Limit CPU for local search
-    RCLCPP_INFO(this->get_logger(), "Global search disabled. Performing 1-meter local initialization...");
+    RCLCPP_INFO(this->get_logger(), "Global search disabled. Performing 1-meter local initialization around [%.2f, %.2f]...", origin_x, origin_y);
   }
 
   int samples_x = std::max(1, static_cast<int>(std::ceil((search_x_max - search_x_min) / global_search_coarse_step_)));

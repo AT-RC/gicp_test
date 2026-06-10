@@ -114,6 +114,7 @@ private:
   std::atomic<bool> global_search_done_{false};
   std::thread registration_thread_;
   std::atomic<bool> run_thread_{true};
+  int lost_tracking_count_{0};
 
   rclcpp::TimerBase::SharedPtr transform_timer_;
   rclcpp::TimerBase::SharedPtr init_timer_;
