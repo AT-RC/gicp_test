@@ -44,8 +44,8 @@
             gyr_cov_output: 1000.0
             b_acc_cov: 0.01
             b_gyr_cov: 0.01
-            imu_meas_acc_cov: 5.0                          # 0.1 # 2
-            imu_meas_omg_cov: 5.0                          # 0.1 # 2
+            imu_meas_acc_cov: 1.0                          # 0.1 # 2
+            imu_meas_omg_cov: 1.0                          # 0.1 # 2
             gyr_cov_input: 0.01                             # for IMU as input model
             acc_cov_input: 0.1                              # for IMU as input model
             plane_thr: 0.1                                  # 0.05, the threshold for plane criteria, the smaller, the flatter a plane

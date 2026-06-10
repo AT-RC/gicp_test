@@ -459,7 +459,7 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
       for (int iyaw = 0; iyaw < global_search_coarse_yaw_samples_; ++iyaw) {
         double yaw = iyaw * yaw_step;
         Eigen::Isometry3d guess = Eigen::Isometry3d::Identity();
-        guess.translation() << x, y, 0.0;
+        guess.translation() << x, y, previous_result_t_.translation().z();
         guess.linear() = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
         coarse_candidates.push_back(guess);
       }
