@@ -128,7 +128,7 @@ def generate_launch_description():
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_link_to_lidar',
-        arguments=['0.1', '0', '0', '0', '0', '0', '1', 'base_link', 'lidar']
+        arguments=['-0.1', '0', '0', '0', '0', '1.0', '0', 'base_link', 'lidar']
     )
 
     # 7.5 启动虚拟串口发送节点 (发送位姿到单片机)

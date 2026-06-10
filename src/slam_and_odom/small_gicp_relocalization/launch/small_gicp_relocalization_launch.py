@@ -41,6 +41,7 @@ def generate_launch_description():
     lidar_frame = LaunchConfiguration("lidar_frame")
     robot_base_frame = LaunchConfiguration("robot_base_frame")
     prior_pcd_file = LaunchConfiguration("prior_pcd_file")
+    enable_global_search = LaunchConfiguration("enable_global_search")
 
     declare_num_threads = DeclareLaunchArgument(
         "num_threads", default_value="4", description="Number of threads"
@@ -77,6 +78,9 @@ def generate_launch_description():
         default_value=PathJoinSubstitution([point_lio_dir, "PCD", "scans.pcd"]), 
         description="Prior PCD file"
     )
+    declare_enable_global_search = DeclareLaunchArgument(
+        "enable_global_search", default_value="false", description="Enable full map global search"
+    )
 
     node = Node(
         package="small_gicp_relocalization",
@@ -97,6 +101,7 @@ def generate_launch_description():
                 "lidar_frame": lidar_frame,
                 "robot_base_frame": robot_base_frame,
                 "prior_pcd_file": prior_pcd_file,
+                "enable_global_search": enable_global_search,
             }
         ],
     )
@@ -113,5 +118,6 @@ def generate_launch_description():
         declare_lidar_frame,
         declare_robot_base_frame,
         declare_prior_pcd_file,
+        declare_enable_global_search,
         node
     ])

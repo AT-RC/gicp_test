@@ -14,7 +14,6 @@
         common:
             lid_topic: "livox/lidar"
             imu_topic: "livox/imu"
-            map_frame: "odom"                               # Set to odom because GICP publishes map -> odom
             con_frame: False                                # True: if you need to combine several LiDAR frames into one
             con_frame_num: 1                                # the number of frames combined
             cut_frame: False                                # True: if you need to cut one LiDAR frame into several subframes
@@ -52,8 +51,8 @@
             plane_thr: 0.1                                  # 0.05, the threshold for plane criteria, the smaller, the flatter a plane
             match_s: 81.0
             ivox_grid_resolution: 2.0
-            gravity: [ 0.0, 0.0, -9.810 ]                   # [0.0, 9.810, 0.0] # gravity to be aligned
-            gravity_init: [ 0.0, 0.0, -9.810 ]              # [0.0, 9.810, 0.0] # # preknown gravity in the first IMU body frame, use when imu_en is False or start from a non-stationary state
+            gravity: [ 0.0, 0.0, 9.810 ]                   # [0.0, 9.810, 0.0] # gravity to be aligned
+            gravity_init: [ 0.0, 0.0, 9.810 ]              # [0.0, 9.810, 0.0] # # preknown gravity in the first IMU body frame, use when imu_en is False or start from a non-stationary state
             extrinsic_T: [ -0.011, -0.02329, 0.04412 ]
             extrinsic_R: [ 1.0, 0.0, 0.0,
                            0.0, 1.0, 0.0,

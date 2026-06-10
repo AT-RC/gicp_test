@@ -78,6 +78,12 @@ private:
   double map_filter_z_min_;
   double map_filter_z_max_;
 
+  double continuous_update_rate_;
+  double update_min_translation_;
+  double update_min_rotation_;
+
+  bool enable_global_search_;
+
   std::string map_frame_;
   std::string odom_frame_;
   std::string prior_pcd_file_;

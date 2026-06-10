@@ -52,12 +52,18 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->declare_parameter("global_search_coarse_iters", 2);
   this->declare_parameter("global_search_fine_iters", 15);
 
-  this->declare_parameter("map_filter_x_min", 0.0);
-  this->declare_parameter("map_filter_x_max", 50.0);
-  this->declare_parameter("map_filter_y_min", -2.0);
-  this->declare_parameter("map_filter_y_max", 2.0);
-  this->declare_parameter("map_filter_z_min", 0.0);
-  this->declare_parameter("map_filter_z_max", 6.0);
+  this->declare_parameter("map_filter_x_min", -5.0);
+  this->declare_parameter("map_filter_x_max", 5.0);
+  this->declare_parameter("map_filter_y_min", -5.0);
+  this->declare_parameter("map_filter_y_max", 5.0);
+  this->declare_parameter("map_filter_z_min", -1.0);
+  this->declare_parameter("map_filter_z_max", 5.0);
+
+  this->declare_parameter("continuous_update_rate", 0.5);
+  this->declare_parameter("update_min_translation", 0.03);
+  this->declare_parameter("update_min_rotation", 0.02);
+
+  this->declare_parameter("enable_global_search", false);
 
   this->get_parameter("num_threads", num_threads_);
   this->get_parameter("num_neighbors", num_neighbors_);
@@ -89,6 +95,12 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->get_parameter("map_filter_y_max", map_filter_y_max_);
   this->get_parameter("map_filter_z_min", map_filter_z_min_);
   this->get_parameter("map_filter_z_max", map_filter_z_max_);
+
+  this->get_parameter("continuous_update_rate", continuous_update_rate_);
+  this->get_parameter("update_min_translation", update_min_translation_);
+  this->get_parameter("update_min_rotation", update_min_rotation_);
+
+  this->get_parameter("enable_global_search", enable_global_search_);
 
   // [x, y, z, roll, pitch, yaw] - init_pose parameters
   if (!init_pose_.empty() && init_pose_.size() >= 6) {
@@ -127,7 +139,8 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
       } else {
         this->performRegistration();
       }
-      std::this_thread::sleep_for(std::chrono::milliseconds(500)); // 2Hz
+      int sleep_ms = static_cast<int>(1000.0 / std::max(0.01, continuous_update_rate_));
+      std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
     }
   });
 
@@ -275,12 +288,23 @@ void SmallGicpRelocalizationNode::performRegistration()
       "[Confidence Report] Overall Score: %.1f/100  (Overlap: %.1f%%, Avg Error: %.3f meters)", 
       confidence, overlap_ratio * 100.0, rmse);
 
-    // 恢复连续 GICP 重定位：只有在可信度大于 40 分时才更新地图 TF，
-    // 这样既能连续修正 point_lio 的累积漂移，又能防止在走廊等特征稀疏处发生“滑动飘走”。
+    // 恢复连续 GICP 重定位：只有在可信度大于 40 分时才尝试更新地图 TF
     if (confidence > 40.0) {
-      std::lock_guard<std::mutex> lock(pose_mutex_);
-      result_t_ = result.T_target_source;
-      previous_result_t_ = result_t_;
+      Eigen::Isometry3d new_pose = result.T_target_source;
+      double translation_diff = (new_pose.translation() - previous_result_t_.translation()).norm();
+      
+      Eigen::AngleAxisd angle_axis(new_pose.linear().transpose() * previous_result_t_.linear());
+      double angle_diff = std::abs(angle_axis.angle());
+
+      // 死区拦截 (Deadband Interception)
+      if (translation_diff > update_min_translation_ || angle_diff > update_min_rotation_) {
+        std::lock_guard<std::mutex> lock(pose_mutex_);
+        result_t_ = new_pose;
+        previous_result_t_ = result_t_;
+        RCLCPP_INFO(this->get_logger(), "★ ★ GICP 已更正 ★ ★ 平移纠正: %.3f米, 旋转纠正: %.3f弧度", translation_diff, angle_diff);
+      } else {
+        RCLCPP_DEBUG(this->get_logger(), "GICP 误差极小 (%.3f米), 跳过更正，保持 Point-LIO 丝滑轨迹", translation_diff);
+      }
     } else {
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, 
         "GICP confidence too low (%.1f), skipping continuous TF update to prevent drift.", confidence);
@@ -388,19 +412,37 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
 
   std::vector<Eigen::Isometry3d> coarse_candidates;
   
-  int samples_x = std::max(1, static_cast<int>(std::ceil((map_filter_x_max_ - map_filter_x_min_) / global_search_coarse_step_)));
-  int samples_y = std::max(1, static_cast<int>(std::ceil((map_filter_y_max_ - map_filter_y_min_) / global_search_coarse_step_)));
+  double search_x_min = map_filter_x_min_;
+  double search_x_max = map_filter_x_max_;
+  double search_y_min = map_filter_y_min_;
+  double search_y_max = map_filter_y_max_;
+  int search_threads = omp_get_max_threads(); // Full CPU for global search
+
+  if (!enable_global_search_) {
+    // 1-meter local search around origin (init_pose)
+    double origin_x = init_pose_.empty() ? 0.0 : init_pose_[0];
+    double origin_y = init_pose_.empty() ? 0.0 : init_pose_[1];
+    search_x_min = origin_x - 1.0;
+    search_x_max = origin_x + 1.0;
+    search_y_min = origin_y - 1.0;
+    search_y_max = origin_y + 1.0;
+    search_threads = num_threads_; // Limit CPU for local search
+    RCLCPP_INFO(this->get_logger(), "Global search disabled. Performing 1-meter local initialization...");
+  }
+
+  int samples_x = std::max(1, static_cast<int>(std::ceil((search_x_max - search_x_min) / global_search_coarse_step_)));
+  int samples_y = std::max(1, static_cast<int>(std::ceil((search_y_max - search_y_min) / global_search_coarse_step_)));
   
-  double x_step = (samples_x > 1) ? ((map_filter_x_max_ - map_filter_x_min_) / (samples_x - 1)) : 0.0;
-  double y_step = (samples_y > 1) ? ((map_filter_y_max_ - map_filter_y_min_) / (samples_y - 1)) : 0.0;
+  double x_step = (samples_x > 1) ? ((search_x_max - search_x_min) / (samples_x - 1)) : 0.0;
+  double y_step = (samples_y > 1) ? ((search_y_max - search_y_min) / (samples_y - 1)) : 0.0;
   double yaw_step = 2.0 * M_PI / std::max(1, global_search_coarse_yaw_samples_);
 
   RCLCPP_INFO(this->get_logger(), "Global search coarse grid: %dx%d samples (step: %.2fm)", samples_x, samples_y, global_search_coarse_step_);
 
   for (int ix = 0; ix < samples_x; ++ix) {
-    double x = map_filter_x_min_ + ix * x_step;
+    double x = search_x_min + ix * x_step;
     for (int iy = 0; iy < samples_y; ++iy) {
-      double y = map_filter_y_min_ + iy * y_step;
+      double y = search_y_min + iy * y_step;
       for (int iyaw = 0; iyaw < global_search_coarse_yaw_samples_; ++iyaw) {
         double yaw = iyaw * yaw_step;
         Eigen::Isometry3d guess = Eigen::Isometry3d::Identity();
@@ -424,8 +466,7 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
   };
   std::vector<CandidateResult> top_candidates;
 
-  // 释放全部 CPU 性能，不受参数 num_threads_ 限制
-  #pragma omp parallel for
+  #pragma omp parallel for num_threads(search_threads)
   for (size_t i = 0; i < coarse_candidates.size(); ++i) {
     small_gicp::Registration<small_gicp::GICPFactor, small_gicp::ParallelReductionOMP> local_reg;
     local_reg.reduction.num_threads = 1; 
@@ -472,7 +513,7 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
   Eigen::Isometry3d best_pose = Eigen::Isometry3d::Identity();
   bool found_valid = false;
 
-  #pragma omp parallel for
+  #pragma omp parallel for num_threads(search_threads)
   for (size_t i = 0; i < top_candidates.size(); ++i) {
     small_gicp::Registration<small_gicp::GICPFactor, small_gicp::ParallelReductionOMP> local_reg;
     local_reg.reduction.num_threads = 1; 
