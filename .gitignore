@@ -10,3 +10,5 @@ __pycache__/
 # IDEs and OS files
 .vscode/
 .DS_Store
+*.pcd
+*.ply
