@@ -42,7 +42,7 @@ def generate_launch_description():
 
     declare_prior_pcd_file_cmd = DeclareLaunchArgument(
         "prior_pcd_file",
-        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "scans.pcd"]),
+        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "scans_1.pcd"]),
         description="Full path to prior PCD file to load",
     )
 

@@ -19,6 +19,7 @@
 #include "small_gicp/pcl/pcl_registration.hpp"
 #include "small_gicp/util/downsampling_omp.hpp"
 #include "tf2_eigen/tf2_eigen.hpp"
+#include <Eigen/Eigenvalues>
 
 namespace small_gicp_relocalization
 {
@@ -57,7 +58,7 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->declare_parameter("map_filter_y_min", -5.0);
   this->declare_parameter("map_filter_y_max", 5.0);
   this->declare_parameter("map_filter_z_min", -1.0);
-  this->declare_parameter("map_filter_z_max", 5.0);
+  this->declare_parameter("map_filter_z_max", 8.0);
 
   this->declare_parameter("continuous_update_rate", 0.5);
   this->declare_parameter("update_min_translation", 0.03);
@@ -278,15 +279,30 @@ void SmallGicpRelocalizationNode::performRegistration()
     double overlap_ratio = std::min(1.0, (double)result.num_inliers / source_->size());
     double rmse = std::sqrt(result.error / result.num_inliers);
     
+    // 退化检测 (Degeneracy Detection)
+    // 分析 Hessian 矩阵特征值，如果最小特征值极小，说明在某方向上没有约束力（如长直走廊）
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, 6, 6>> eigensolver(result.H);
+    double min_eigenvalue = eigensolver.eigenvalues().minCoeff();
+    double degeneracy_metric = min_eigenvalue / std::max(1.0, (double)result.num_inliers);
+    
     // 综合可信度评分 (0~100)
     // 重叠率权重占70%，误差权重占30%（0.5米误差得0分，0误差得满分）
     double overlap_score = overlap_ratio * 100.0;
     double rmse_score = std::max(0.0, 100.0 - (rmse * 200.0));
     double confidence = (overlap_score * 0.7) + (rmse_score * 0.3);
 
+    // 如果出现特征退化，轻度惩罚得分，迫使算法要求更高的重叠率才能采信
+    if (degeneracy_metric < 5.0) {
+      double penalty = std::max(0.5, degeneracy_metric / 5.0); // 最多扣减一半分数
+      confidence *= penalty;
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, 
+        "[Degeneracy Warning] Min Eigenvalue metric (%.3f) too low! Penalizing confidence to %.1f", 
+        degeneracy_metric, confidence);
+    }
+
     RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 10000, 
-      "[Confidence Report] Overall Score: %.1f/100  (Overlap: %.1f%%, Avg Error: %.3f meters)", 
-      confidence, overlap_ratio * 100.0, rmse);
+      "[Confidence Report] Overall Score: %.1f/100  (Overlap: %.1f%%, Avg Error: %.3f meters, Eigen: %.2f)", 
+      confidence, overlap_ratio * 100.0, rmse, degeneracy_metric);
 
     // 恢复连续 GICP 重定位：只有在可信度大于 40 分时才尝试更新地图 TF
     if (confidence > 40.0) {
@@ -494,11 +510,13 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
       
       std::lock_guard<std::mutex> lock(top_mutex);
       top_candidates.push_back({score, result.T_target_source});
-      std::sort(top_candidates.begin(), top_candidates.end());
-      if (top_candidates.size() > 5) {
-          top_candidates.pop_back();
-      }
     }
+  }
+
+  // 移出多线程循环外部进行排序，彻底消除多线程锁等待和排序的性能瓶颈
+  std::sort(top_candidates.begin(), top_candidates.end());
+  if (top_candidates.size() > 5) {
+      top_candidates.resize(5);
   }
 
   if (top_candidates.empty()) {

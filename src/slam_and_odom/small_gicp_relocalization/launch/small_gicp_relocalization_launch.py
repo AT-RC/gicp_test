@@ -42,6 +42,7 @@ def generate_launch_description():
     robot_base_frame = LaunchConfiguration("robot_base_frame")
     prior_pcd_file = LaunchConfiguration("prior_pcd_file")
     enable_global_search = LaunchConfiguration("enable_global_search")
+    continuous_update_rate = LaunchConfiguration("continuous_update_rate")
 
     declare_num_threads = DeclareLaunchArgument(
         "num_threads", default_value="4", description="Number of threads"
@@ -81,6 +82,9 @@ def generate_launch_description():
     declare_enable_global_search = DeclareLaunchArgument(
         "enable_global_search", default_value="false", description="Enable full map global search"
     )
+    declare_continuous_update_rate = DeclareLaunchArgument(
+        "continuous_update_rate", default_value="1.0", description="Continuous update rate for GICP"
+    )
 
     node = Node(
         package="small_gicp_relocalization",
@@ -102,6 +106,7 @@ def generate_launch_description():
                 "robot_base_frame": robot_base_frame,
                 "prior_pcd_file": prior_pcd_file,
                 "enable_global_search": enable_global_search,
+                "continuous_update_rate": continuous_update_rate,
             }
         ],
     )
@@ -119,5 +124,6 @@ def generate_launch_description():
         declare_robot_base_frame,
         declare_prior_pcd_file,
         declare_enable_global_search,
+        declare_continuous_update_rate,
         node
     ])
