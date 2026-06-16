@@ -1,0 +1,3 @@
+[CodeGraph daemon] Listening on /home/xjh/Desktop/at_rc/.codegraph/daemon.sock (pid 16432, v1.0.1). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph daemon] Shutting down (inactivity backstop; clients=1).

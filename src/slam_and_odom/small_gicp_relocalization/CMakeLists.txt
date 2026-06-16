@@ -14,6 +14,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(ament_cmake_auto REQUIRED)
 find_package(OpenMP REQUIRED)
+find_package(small_gicp REQUIRED)
 ament_auto_find_build_dependencies()
 
 ###########
@@ -24,7 +25,7 @@ ament_auto_find_build_dependencies()
 ament_auto_add_library(${PROJECT_NAME} SHARED
   src/small_gicp_relocalization.cpp
 )
-target_link_libraries(${PROJECT_NAME} OpenMP::OpenMP_CXX)
+target_link_libraries(${PROJECT_NAME} OpenMP::OpenMP_CXX small_gicp::small_gicp)
 
 # 2. 创建自定义可执行文件 (包含我们的多线程 main)
 add_executable(${PROJECT_NAME}_node src/small_gicp_relocalization_main.cpp)
