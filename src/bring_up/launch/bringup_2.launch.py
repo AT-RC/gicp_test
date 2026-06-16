@@ -42,7 +42,7 @@ def generate_launch_description():
 
     declare_prior_pcd_file_cmd = DeclareLaunchArgument(
         "prior_pcd_file",
-        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "scans_2.pcd"]),
+        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "new_map4.pcd"]),
         description="Full path to prior PCD file to load",
     )
 
@@ -128,7 +128,7 @@ def generate_launch_description():
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_link_to_lidar',
-        arguments=['-0.1', '0', '0', '0', '0', '1.0', '0', 'base_link', 'lidar']
+        arguments=['-0.15', '0', '0', '0', '0', '1.0', '0', 'base_link', 'lidar']
     )
 
     # 7.5 启动虚拟串口发送节点 (发送位姿到单片机)
