@@ -19,6 +19,7 @@ def generate_launch_description():
     lio_type = LaunchConfiguration('lio_type')
     localization = LaunchConfiguration('localization')
     prior_pcd_file = LaunchConfiguration("prior_pcd_file")
+    enable_global_search = LaunchConfiguration('enable_global_search')
     rviz = LaunchConfiguration('rviz')
 
     # 声明参数
@@ -50,6 +51,12 @@ def generate_launch_description():
         'rviz',
         default_value='true',
         description='Whether to start RViz'
+    )
+
+    declare_enable_global_search = DeclareLaunchArgument(
+        'enable_global_search',
+        default_value='false',
+        description='Whether to enable full map global search for GICP'
     )
 
     # 2. 包含 Livox Mid360 雷达驱动 Launch
@@ -89,7 +96,8 @@ def generate_launch_description():
             'map_frame': 'map',
             'odom_frame': 'odom',
             'base_frame': 'base_link',
-            'lidar_frame': 'lidar'
+            'lidar_frame': 'lidar',
+            'enable_global_search': enable_global_search
         }.items()
     )
 
@@ -128,7 +136,7 @@ def generate_launch_description():
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_link_to_lidar',
-        arguments=['-0.15', '0', '0', '0', '0', '1.0', '0', 'base_link', 'lidar']
+        arguments=['-0.16', '0', '0', '0', '0', '1.0', '0', 'base_link', 'lidar']
     )
 
     # 7.5 启动虚拟串口发送节点 (发送位姿到单片机)
@@ -161,6 +169,7 @@ def generate_launch_description():
         declare_save_map,
         declare_localization,
         declare_prior_pcd_file_cmd,
+        declare_enable_global_search,
         declare_rviz_arg,
         loam_interface_launch,
         livox_launch,

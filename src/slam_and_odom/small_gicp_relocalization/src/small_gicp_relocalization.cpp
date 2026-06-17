@@ -420,7 +420,7 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
   
   {
     std::lock_guard<std::mutex> lock(cloud_mutex_);
-    if (accumulated_cloud_->empty() || accumulated_cloud_->size() < 15000) {
+    if (accumulated_cloud_->empty() || accumulated_cloud_->size() < 5000) {
       RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
         "Waiting for more points to perform global search... current size: %zu", accumulated_cloud_->size());
       return;
@@ -459,20 +459,23 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
     RCLCPP_INFO(this->get_logger(), "Global search disabled. Performing 1-meter local initialization around [%.2f, %.2f]...", origin_x, origin_y);
   }
 
-  int samples_x = std::max(1, static_cast<int>(std::ceil((search_x_max - search_x_min) / global_search_coarse_step_)));
-  int samples_y = std::max(1, static_cast<int>(std::ceil((search_y_max - search_y_min) / global_search_coarse_step_)));
+  double step = enable_global_search_ ? global_search_coarse_step_ : global_search_step_;
+  int samples_x = std::max(1, static_cast<int>(std::round((search_x_max - search_x_min) / step)) + 1);
+  int samples_y = std::max(1, static_cast<int>(std::round((search_y_max - search_y_min) / step)) + 1);
   
   double x_step = (samples_x > 1) ? ((search_x_max - search_x_min) / (samples_x - 1)) : 0.0;
   double y_step = (samples_y > 1) ? ((search_y_max - search_y_min) / (samples_y - 1)) : 0.0;
-  double yaw_step = 2.0 * M_PI / std::max(1, global_search_coarse_yaw_samples_);
+  
+  int yaw_samples = enable_global_search_ ? global_search_coarse_yaw_samples_ : global_search_yaw_samples_;
+  double yaw_step = 2.0 * M_PI / std::max(1, yaw_samples);
 
-  RCLCPP_INFO(this->get_logger(), "Global search coarse grid: %dx%d samples (step: %.2fm)", samples_x, samples_y, global_search_coarse_step_);
+  RCLCPP_INFO(this->get_logger(), "Global search grid: %dx%d samples (step: %.2fm), %d yaw samples", samples_x, samples_y, step, yaw_samples);
 
   for (int ix = 0; ix < samples_x; ++ix) {
     double x = search_x_min + ix * x_step;
     for (int iy = 0; iy < samples_y; ++iy) {
       double y = search_y_min + iy * y_step;
-      for (int iyaw = 0; iyaw < global_search_coarse_yaw_samples_; ++iyaw) {
+      for (int iyaw = 0; iyaw < yaw_samples; ++iyaw) {
         double yaw = iyaw * yaw_step;
         Eigen::Isometry3d guess = Eigen::Isometry3d::Identity();
         guess.translation() << x, y, previous_result_t_.translation().z();
