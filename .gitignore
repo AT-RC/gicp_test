@@ -12,3 +12,4 @@ __pycache__/
 .DS_Store
 *.pcd
 *.ply
+src/slam_and_odom/small_gicp
