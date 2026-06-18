@@ -23,50 +23,22 @@ def generate_launch_description():
     rviz = LaunchConfiguration('rviz')
 
     # 声明参数
-    declare_lio_type = DeclareLaunchArgument(
-        'lio_type',
-        default_value='point_lio',
-        description='Choose LIO type: fast_lio or point_lio'
-    )
-
-    declare_save_map = DeclareLaunchArgument(
-        'save_map',
-        default_value='false',
-        description='Whether to enable mapping mode and save PCD map'
-    )
-
-    declare_localization = DeclareLaunchArgument(
-        'localization',
-        default_value='true',
-        description='Whether to enable GICP relocalization'
-    )
-
+    declare_lio_type = DeclareLaunchArgument('lio_type', default_value='point_lio')
+    declare_save_map = DeclareLaunchArgument('save_map', default_value='false')
+    declare_localization = DeclareLaunchArgument('localization', default_value='true')
     declare_prior_pcd_file_cmd = DeclareLaunchArgument(
         "prior_pcd_file",
-        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "new_map4.pcd"]),
-        description="Full path to prior PCD file to load",
+        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "scans_1.pcd"])
     )
-
-    declare_rviz_arg = DeclareLaunchArgument(
-        'rviz',
-        default_value='true',
-        description='Whether to start RViz'
-    )
-
-    declare_enable_global_search = DeclareLaunchArgument(
-        'enable_global_search',
-        default_value='false',
-        description='Whether to enable full map global search for GICP'
-    )
+    declare_rviz_arg = DeclareLaunchArgument('rviz', default_value='true')
+    declare_enable_global_search = DeclareLaunchArgument('enable_global_search', default_value='false')
 
     # 2. 包含 Livox Mid360 雷达驱动 Launch
     livox_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            PathJoinSubstitution([livox_driver_dir, 'launch', 'msg_MID360_launch.py'])
-        )
+        PythonLaunchDescriptionSource(PathJoinSubstitution([livox_driver_dir, 'launch', 'msg_MID360_launch.py']))
     )
 
-    # 3.5 启动 Point-LIO 节点
+    # 3. 启动 Point-LIO 节点 (仍然输出 /odometry)
     point_lio_cfg_dir = PathJoinSubstitution([point_lio_dir, "config", "mid360.yaml"])
     point_lio_node = Node(
         condition=IfCondition(PythonExpression(["'", lio_type, "' == 'point_lio'"])),
@@ -85,76 +57,84 @@ def generate_launch_description():
         ]
     )
 
-    # 4. 包含 GICP 重定位 Launch
+    # 4. 包含 GICP 重定位 Launch (架空它的 TF 输出)
     gicp_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            PathJoinSubstitution([gicp_dir, 'launch', 'small_gicp_relocalization_launch.py'])
-        ),
+        PythonLaunchDescriptionSource(PathJoinSubstitution([gicp_dir, 'launch', 'small_gicp_relocalization_launch.py'])),
         condition=IfCondition(localization),
         launch_arguments={
             'prior_pcd_file': prior_pcd_file,
-            'map_frame': 'map',
-            'odom_frame': 'odom',
+            'map_frame': 'map_gicp',        # 架空
+            'odom_frame': 'odom_gicp',      # 架空
             'base_frame': 'base_link',
             'lidar_frame': 'lidar',
             'enable_global_search': enable_global_search
         }.items()
     )
 
-    # 5. 包含 loam_interface Launch
-    # 它将 Fast-LIO 的里程计从 lidar_odom 转换到 odom 系，并发布 odom -> base_link
+    # 5. 包含 loam_interface Launch (仅用于点云转换，架空它的 TF)
     loam_interface_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            PathJoinSubstitution([loam_interface_dir, 'launch', 'loam_interface_launch.py'])
-        ),
+        PythonLaunchDescriptionSource(PathJoinSubstitution([loam_interface_dir, 'launch', 'loam_interface_launch.py'])),
         launch_arguments={
             'state_estimation_topic': '/odometry',
             'registered_scan_topic': '/cloud_registered',
-            'odom_frame': 'odom',
-            'base_frame': 'base_link',
+            'odom_frame': 'odom_lio',       # 架空
+            'base_frame': 'base_link_lio',  # 架空
             'lidar_frame': 'lidar'
         }.items()
     )
 
-    # 6. 启动 C++ 坐标监控节点
-    odom_monitor_node = Node(
+    # 6. 启动 TF 到 Pose 转换器
+    tf_to_pose_node = Node(
         package='bring_up',
-        executable='odom_monitor',
-        name='odom_monitor',
-        output='screen'
+        executable='tf_to_pose.py',
+        name='tf_to_pose_converter',
+        output='screen',
+        parameters=[{
+            'target_frame': 'odom_gicp',
+            'source_frame': 'map_gicp',
+            'pose_topic': '/gicp_pose',
+            'rate': 10.0,
+            'output_frame_id': 'map'
+        }]
     )
 
+    # 7. 启动 Local EKF (输出 odom -> base_link)
+    ekf_local_node = Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='ekf_local',
+        output='screen',
+        parameters=[PathJoinSubstitution([bring_up_dir, 'config', 'ekf.yaml'])],
+        remappings=[('odometry/filtered', 'odometry/local')]
+    )
+
+    # 8. 启动 Global EKF (输出 map -> odom)
+    ekf_global_node = Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='ekf_global',
+        output='screen',
+        parameters=[PathJoinSubstitution([bring_up_dir, 'config', 'ekf.yaml'])],
+        remappings=[('odometry/filtered', 'odometry/global')]
+    )
+
+    # 9. 启动 C++ 全局坐标监控节点 (包含初始化状态检测)
     map_monitor_node = Node(
         package='bring_up',
-        executable='map_monitor',
-        name='map_monitor',
+        executable='ekf_map_monitor',
+        name='ekf_map_monitor',
         output='screen'
     )
 
-    # 7. 静态 TF 发布 (base_link -> lidar)
+    # 10. 静态 TF 发布 (base_link -> lidar)
     static_tf_node = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_link_to_lidar',
-        arguments=['-0.15', '0', '0.138', '0', '0', '1.0', '0', 'base_link', 'lidar']
+        arguments=['-0.16', '0', '0', '0', '0', '1.0', '0', 'base_link', 'lidar']
     )
 
-    # 7.5 启动虚拟串口发送节点 (发送位姿到单片机)
-    serial_node = Node(
-        package='virtual_serial_port',
-        executable='virtual_serial_port_node',
-        name='virtual_serial_port',
-        output='screen',
-        parameters=[{
-            'usb_vid': 0x0483,
-            'usb_pid': 0x5740,
-            'send_interval_ms': 10,
-            'odom_frame': 'odom',  # 根据 SLAM 输出调整，通常为 camera_init 或 odom
-            'base_frame': 'base_link'    # 通常为 aft_mapped 或 base_link
-        }]
-    )
-
-    # 8. 启动 RViz
+    # 11. 启动 RViz
     rviz_config_file = PathJoinSubstitution([bring_up_dir, 'rviz', 'airy.rviz'])
     rviz_node = Node(
         package='rviz2',
@@ -165,19 +145,16 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        declare_lio_type,
-        declare_save_map,
-        declare_localization,
-        declare_prior_pcd_file_cmd,
-        declare_enable_global_search,
-        declare_rviz_arg,
+        declare_lio_type, declare_save_map, declare_localization,
+        declare_prior_pcd_file_cmd, declare_enable_global_search, declare_rviz_arg,
         loam_interface_launch,
         livox_launch,
         point_lio_node,
         gicp_launch,
-        # odom_monitor_node,
-        map_monitor_node,
         static_tf_node,
-        # serial_node,
+        tf_to_pose_node,
+        ekf_local_node,
+        ekf_global_node,
+        map_monitor_node,
         rviz_node
     ])
