@@ -1,1 +1,0 @@
-ros2 bag record -o src/slam_and_odom/point_lio/rosbag/imu_record /imu/data
