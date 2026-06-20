@@ -63,10 +63,11 @@ def generate_launch_description():
         condition=IfCondition(localization),
         launch_arguments={
             'prior_pcd_file': prior_pcd_file,
-            'map_frame': 'map_gicp',        # 架空
-            'odom_frame': 'odom_gicp',      # 架空
-            'base_frame': 'base_link',
-            'lidar_frame': 'lidar',
+            'map_frame': 'map_gicp',        # 隔离的 map
+            'odom_frame': 'odom_lio',       # GICP 需要追踪 LIO 的 odom
+            'base_frame': 'base_link_lio',  # GICP 需要追踪 LIO 的 base_link
+            'lidar_frame': 'lidar_lio',
+            'robot_base_frame': 'base_link_lio',
             'enable_global_search': enable_global_search
         }.items()
     )
@@ -77,9 +78,9 @@ def generate_launch_description():
         launch_arguments={
             'state_estimation_topic': '/odometry',
             'registered_scan_topic': '/cloud_registered',
-            'odom_frame': 'odom_lio',       # 架空
-            'base_frame': 'base_link_lio',  # 架空
-            'lidar_frame': 'lidar'
+            'odom_frame': 'odom_lio',       # 隔离的 odom
+            'base_frame': 'base_link_lio',  # 隔离的 base_link
+            'lidar_frame': 'lidar_lio'      # 隔离的 lidar
         }.items()
     )
 
@@ -90,7 +91,7 @@ def generate_launch_description():
         name='tf_to_pose_converter',
         output='screen',
         parameters=[{
-            'target_frame': 'odom_gicp',
+            'target_frame': 'odom_lio',     # GICP 发布的子坐标系现在是 odom_lio
             'source_frame': 'map_gicp',
             'pose_topic': '/gicp_pose',
             'rate': 10.0,
@@ -126,12 +127,20 @@ def generate_launch_description():
         output='screen'
     )
 
-    # 10. 静态 TF 发布 (base_link -> lidar)
+    # 10. 静态 TF 发布 (正式的 base_link -> lidar，供 EKF 系统使用)
     static_tf_node = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_link_to_lidar',
-        arguments=['-0.16', '0', '0', '0', '0', '1.0', '0', 'base_link', 'lidar']
+        arguments=['-0.15', '0', '0.138', '0', '0', '1.0', '0', 'base_link', 'lidar']
+    )
+
+    # 11. 静态 TF 发布 (隔离的 base_link_lio -> lidar_lio，供 LIO 系统使用)
+    static_tf_node_lio = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='base_link_lio_to_lidar_lio',
+        arguments=['-0.15', '0', '0.138', '0', '0', '1.0', '0', 'base_link_lio', 'lidar_lio']
     )
 
     # 11. 启动 RViz
