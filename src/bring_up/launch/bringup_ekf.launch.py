@@ -72,15 +72,16 @@ def generate_launch_description():
         }.items()
     )
 
-    # 5. 包含 loam_interface Launch (仅用于点云转换，架空它的 TF)
+    # 5. 包含 loam_interface Launch (用于点云转换，并输出正确的 lidar_odometry 给 EKF)
     loam_interface_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([loam_interface_dir, 'launch', 'loam_interface_launch.py'])),
         launch_arguments={
             'state_estimation_topic': '/odometry',
             'registered_scan_topic': '/cloud_registered',
-            'odom_frame': 'odom_lio',       # 隔离的 odom
-            'base_frame': 'base_link_lio',  # 隔离的 base_link
-            'lidar_frame': 'lidar_lio'      # 隔离的 lidar
+            'odom_frame': 'odom',
+            'base_frame': 'base_link',
+            'lidar_frame': 'lidar',
+            'publish_tf': 'false'
         }.items()
     )
 
@@ -90,8 +91,8 @@ def generate_launch_description():
         executable='tf_to_pose.py',
         name='tf_to_pose_converter',
         output='screen',
-        parameters=[{
-            'target_frame': 'odom_lio',     # GICP 发布的子坐标系现在是 odom_lio
+        parameters=[{'use_sim_time': True, 
+            'target_frame': 'base_link_lio',
             'source_frame': 'map_gicp',
             'pose_topic': '/gicp_pose',
             'rate': 10.0,
@@ -105,7 +106,7 @@ def generate_launch_description():
         executable='ekf_node',
         name='ekf_local',
         output='screen',
-        parameters=[PathJoinSubstitution([bring_up_dir, 'config', 'ekf.yaml'])],
+        parameters=[PathJoinSubstitution([bring_up_dir, 'config', 'ekf.yaml']), {'use_sim_time': True}],
         remappings=[('odometry/filtered', 'odometry/local')]
     )
 
@@ -115,7 +116,7 @@ def generate_launch_description():
         executable='ekf_node',
         name='ekf_global',
         output='screen',
-        parameters=[PathJoinSubstitution([bring_up_dir, 'config', 'ekf.yaml'])],
+        parameters=[PathJoinSubstitution([bring_up_dir, 'config', 'ekf.yaml']), {'use_sim_time': True}],
         remappings=[('odometry/filtered', 'odometry/global')]
     )
 
@@ -157,9 +158,9 @@ def generate_launch_description():
         declare_lio_type, declare_save_map, declare_localization,
         declare_prior_pcd_file_cmd, declare_enable_global_search, declare_rviz_arg,
         loam_interface_launch,
-        livox_launch,
-        point_lio_node,
-        gicp_launch,
+        #livox_launch,
+        #point_lio_node,
+        #gicp_launch,
         static_tf_node,
         static_tf_node_lio,
         tf_to_pose_node,

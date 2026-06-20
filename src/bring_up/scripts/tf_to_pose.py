@@ -35,7 +35,7 @@ class TfToPoseNode(Node):
             trans = self.tf_buffer.lookup_transform(self.source_frame, self.target_frame, rclpy.time.Time())
             
             msg = PoseWithCovarianceStamped()
-            msg.header.stamp = trans.header.stamp
+            msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = self.output_frame_id
             
             msg.pose.pose.position.x = trans.transform.translation.x
@@ -45,12 +45,12 @@ class TfToPoseNode(Node):
             
             # Covariance: small for xyz, yaw, large for roll/pitch since GICP is mostly planar reliable
             msg.pose.covariance = [
-                0.01, 0.0, 0.0, 0.0, 0.0, 0.0,
-                0.0, 0.01, 0.0, 0.0, 0.0, 0.0,
-                0.0, 0.0, 0.01, 0.0, 0.0, 0.0,
+                0.5, 0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.5, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.5, 0.0, 0.0, 0.0,
                 0.0, 0.0, 0.0, 100.0, 0.0, 0.0,
                 0.0, 0.0, 0.0, 0.0, 100.0, 0.0,
-                0.0, 0.0, 0.0, 0.0, 0.0, 0.01
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.5
             ]
             
             self.pose_pub.publish(msg)

@@ -26,6 +26,7 @@ def generate_launch_description():
     odom_frame = LaunchConfiguration("odom_frame")
     base_frame = LaunchConfiguration("base_frame")
     lidar_frame = LaunchConfiguration("lidar_frame")
+    publish_tf = LaunchConfiguration("publish_tf")
 
     # Map fully qualified names to relative ones so the node's namespace can be prepended.
     # In case of the transforms (tf), currently, there doesn't seem to be a better alternative
@@ -53,6 +54,9 @@ def generate_launch_description():
     declare_lidar_frame = DeclareLaunchArgument(
         "lidar_frame", default_value="lidar", description="Lidar frame"
     )
+    declare_publish_tf = DeclareLaunchArgument(
+        "publish_tf", default_value="true", description="Whether to publish TF"
+    )
 
     start_loam_interface = Node(
         package="loam_interface",
@@ -68,6 +72,7 @@ def generate_launch_description():
                 "odom_frame": odom_frame,
                 "base_frame": base_frame,
                 "lidar_frame": lidar_frame,
+                "publish_tf": publish_tf,
             }
         ],
     )
@@ -81,6 +86,7 @@ def generate_launch_description():
     ld.add_action(declare_odom_frame)
     ld.add_action(declare_base_frame)
     ld.add_action(declare_lidar_frame)
+    ld.add_action(declare_publish_tf)
     ld.add_action(start_loam_interface)
 
     return ld
