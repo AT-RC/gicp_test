@@ -28,7 +28,7 @@ def generate_launch_description():
     declare_localization = DeclareLaunchArgument('localization', default_value='true')
     declare_prior_pcd_file_cmd = DeclareLaunchArgument(
         "prior_pcd_file",
-        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "scans_1.pcd"])
+        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "new_map4.pcd"])
     )
     declare_rviz_arg = DeclareLaunchArgument('rviz', default_value='true')
     declare_enable_global_search = DeclareLaunchArgument('enable_global_search', default_value='false')
@@ -161,6 +161,7 @@ def generate_launch_description():
         point_lio_node,
         gicp_launch,
         static_tf_node,
+        static_tf_node_lio,
         tf_to_pose_node,
         ekf_local_node,
         ekf_global_node,

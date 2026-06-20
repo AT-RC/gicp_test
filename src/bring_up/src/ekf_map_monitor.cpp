@@ -23,7 +23,7 @@ private:
         bool is_gicp_ready = false;
         try {
             // 通过检查 GICP 是否发出了 TF 来判断全局重定位是否成功初始化
-            tf_buffer_->lookupTransform("map_gicp", "odom_gicp", tf2::TimePointZero);
+            tf_buffer_->lookupTransform("map_gicp", "odom_lio", tf2::TimePointZero);
             is_gicp_ready = true;
         } catch (const tf2::TransformException & ex) {
             is_gicp_ready = false;
