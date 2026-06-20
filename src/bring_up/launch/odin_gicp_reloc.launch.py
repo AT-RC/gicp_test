@@ -3,12 +3,13 @@ from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, GroupAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.substitutions import FindPackageShare
-from launch_ros.actions import SetRemap
+from launch_ros.actions import SetRemap, Node
 
 def generate_launch_description():
     """
     启动 Odin1 驱动 + small_gicp 重定位的联合 Launch 文件
     直接将 Odin1 的实时点云喂给 small_gicp，并在全局 3D 地图中定位。
+    建图指令：echo "set save_map 1" > /tmp/odin_command.txt（新终端中）
     """
     
     # 1. 引入 Odin1 驱动的 Launch 文件
@@ -40,12 +41,56 @@ def generate_launch_description():
                     'robot_base_frame': 'odin1_base_link',
                     'odom_frame': 'odom',
                     'map_frame': 'map',
+                    # 使用 Launch 参数的魔法，把全局搜索网格强制压缩成一个点（原点 [0,0,0, yaw=0]）
+                    # 这样它就只会从原点启动，不会去大范围乱搜，也就彻底避免了对称性跑飞！
+                    'enable_global_search': 'true',
+                    'map_filter_x_min': '0.0',
+                    'map_filter_x_max': '0.0',
+                    'map_filter_y_min': '0.0',
+                    'map_filter_y_max': '0.0',
+                    'map_filter_z_min': '-1.0',
+                    'map_filter_z_max': '1.0',
+                    'global_search_coarse_yaw_samples': '1',
                 }.items()
             )
         ]
     )
 
+    # 3. 启动 pcl_ros 发布 3D 全局地图供 RViz 显示
+    map_pcd_node = Node(
+        package='pcl_ros',
+        executable='pcd_to_pointcloud',
+        name='pcd_to_pointcloud',
+        parameters=[
+            {'file_name': '/home/xjh/Desktop/map/new_map4.pcd'},
+            {'tf_frame': 'map'},
+            {'frame_id': 'map'},
+            {'interval': 0.5}  # 低频发布即可，地图不怎么动
+        ],
+        remappings=[('cloud_pcd', '/global_map')]
+    )
+
+    # 4. 启动 RViz2
+    rviz_node = Node(
+        package='rviz2',
+        executable='rviz2',
+        name='rviz2',
+        arguments=['-d', os.path.join('/home/xjh/Desktop/at_rc/src/bring_up/rviz', 'reloc.rviz')],
+        output='screen'
+    )
+
+    # 5. 启动打印全局位姿的脚本
+    print_pose_node = Node(
+        package='bring_up',
+        executable='print_global_pose.py',
+        name='global_pose_printer',
+        output='screen'
+    )
+
     return LaunchDescription([
         odin_launch,
-        small_gicp_launch
+        small_gicp_launch,
+        map_pcd_node,
+        rviz_node,
+        print_pose_node
     ])

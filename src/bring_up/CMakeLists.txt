@@ -40,6 +40,7 @@ install(DIRECTORY
 install(PROGRAMS
   scripts/odin_map_save.py
   scripts/tf_to_pose.py
+  scripts/print_global_pose.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

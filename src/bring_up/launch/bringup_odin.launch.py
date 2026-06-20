@@ -63,7 +63,7 @@ def generate_launch_description():
         executable='static_transform_publisher',
         name='static_transform_publisher',
         output='screen',
-        arguments=['0.16', '0', '0', '0', '0', '0', 'odin1_base_link', 'base_link']
+        arguments=['0.0', '0', '0', '0', '0', '0', 'odin1_base_link', 'base_link']
     )
 
     # 7. 启动虚拟串口发送节点 (发送位姿到单片机)
