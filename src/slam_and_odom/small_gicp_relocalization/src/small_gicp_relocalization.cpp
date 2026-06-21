@@ -338,19 +338,36 @@ void SmallGicpRelocalizationNode::performRegistration()
       lost_tracking_count_++;
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, 
         "GICP confidence too low (%.1f), skipping continuous TF update to prevent drift.", confidence);
-      if (lost_tracking_count_ > 5) {
+      if (lost_tracking_count_ > 2) {
         RCLCPP_ERROR(this->get_logger(), "Tracking lost for too long (confidence low)! Triggering re-initialization...");
+        
+        // 1. Immediately reset Point-LIO
+        std_msgs::msg::Empty reset_msg;
+        reset_publisher_->publish(reset_msg);
+
+        // 2. Break the TF to trigger safe stop
         global_search_done_ = false;
         lost_tracking_count_ = 0;
+        
+        // 3. Clear the garbage points
+        std::lock_guard<std::mutex> cloud_lock(cloud_mutex_);
+        accumulated_cloud_->clear();
       }
     }
   } else {
     lost_tracking_count_++;
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "GICP did not converge.");
-    if (lost_tracking_count_ > 5) {
+    if (lost_tracking_count_ > 2) {
       RCLCPP_ERROR(this->get_logger(), "Tracking lost for too long (no converge)! Triggering re-initialization...");
+      
+      std_msgs::msg::Empty reset_msg;
+      reset_publisher_->publish(reset_msg);
+
       global_search_done_ = false;
       lost_tracking_count_ = 0;
+      
+      std::lock_guard<std::mutex> cloud_lock(cloud_mutex_);
+      accumulated_cloud_->clear();
     }
   }
 }

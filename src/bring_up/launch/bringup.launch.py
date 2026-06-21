@@ -55,7 +55,7 @@ def generate_launch_description():
 
     declare_enable_global_search = DeclareLaunchArgument(
         'enable_global_search',
-        default_value='false',
+        default_value='true',
         description='Whether to enable full map global search for GICP'
     )
 

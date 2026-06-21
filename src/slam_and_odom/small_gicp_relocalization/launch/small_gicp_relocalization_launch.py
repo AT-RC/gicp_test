@@ -74,16 +74,26 @@ def generate_launch_description():
     declare_robot_base_frame = DeclareLaunchArgument(
         "robot_base_frame", default_value="base_link", description="Robot base frame"
     )
+    declare_map_filter_x_min = DeclareLaunchArgument("map_filter_x_min", default_value="-1.0")
+    declare_map_filter_x_max = DeclareLaunchArgument("map_filter_x_max", default_value="7.0")
+    declare_map_filter_y_min = DeclareLaunchArgument("map_filter_y_min", default_value="-5.0")
+    declare_map_filter_y_max = DeclareLaunchArgument("map_filter_y_max", default_value="1.0")
     declare_prior_pcd_file = DeclareLaunchArgument(
         "prior_pcd_file", 
         default_value=PathJoinSubstitution([point_lio_dir, "PCD", "scans.pcd"]), 
         description="Prior PCD file"
     )
     declare_enable_global_search = DeclareLaunchArgument(
-        "enable_global_search", default_value="false", description="Enable full map global search"
+        "enable_global_search", default_value="true", description="Enable full map global search"
     )
     declare_continuous_update_rate = DeclareLaunchArgument(
         "continuous_update_rate", default_value="1.0", description="Continuous update rate for GICP"
+    )
+    declare_update_min_translation = DeclareLaunchArgument(
+        "update_min_translation", default_value="0.05", description="Minimum translation to update GICP pose (meters)"
+    )
+    declare_update_min_rotation = DeclareLaunchArgument(
+        "update_min_rotation", default_value="0.05", description="Minimum rotation to update GICP pose (radians)"
     )
 
     node = Node(
@@ -104,9 +114,15 @@ def generate_launch_description():
                 "base_frame": base_frame,
                 "lidar_frame": lidar_frame,
                 "robot_base_frame": robot_base_frame,
+                "map_filter_x_min": LaunchConfiguration("map_filter_x_min"),
+                "map_filter_x_max": LaunchConfiguration("map_filter_x_max"),
+                "map_filter_y_min": LaunchConfiguration("map_filter_y_min"),
+                "map_filter_y_max": LaunchConfiguration("map_filter_y_max"),
                 "prior_pcd_file": prior_pcd_file,
                 "enable_global_search": enable_global_search,
                 "continuous_update_rate": continuous_update_rate,
+                "update_min_translation": LaunchConfiguration("update_min_translation"),
+                "update_min_rotation": LaunchConfiguration("update_min_rotation"),
             }
         ],
     )
@@ -122,8 +138,14 @@ def generate_launch_description():
         declare_base_frame,
         declare_lidar_frame,
         declare_robot_base_frame,
+        declare_map_filter_x_min,
+        declare_map_filter_x_max,
+        declare_map_filter_y_min,
+        declare_map_filter_y_max,
         declare_prior_pcd_file,
         declare_enable_global_search,
         declare_continuous_update_rate,
+        declare_update_min_translation,
+        declare_update_min_rotation,
         node
     ])
