@@ -19,14 +19,10 @@ ament_target_dependencies(odom_monitor rclcpp nav_msgs)
 add_executable(map_monitor src/map_monitor.cpp)
 ament_target_dependencies(map_monitor rclcpp tf2_ros geometry_msgs)
 
-add_executable(ekf_map_monitor src/ekf_map_monitor.cpp)
-ament_target_dependencies(ekf_map_monitor rclcpp tf2_ros geometry_msgs)
-
 # Install
 install(TARGETS
   odom_monitor
   map_monitor
-  ekf_map_monitor
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -39,7 +35,6 @@ install(DIRECTORY
 
 install(PROGRAMS
   scripts/odin_map_save.py
-  scripts/tf_to_pose.py
   scripts/print_global_pose.py
   DESTINATION lib/${PROJECT_NAME}
 )
