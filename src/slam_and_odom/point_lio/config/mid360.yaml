@@ -16,8 +16,8 @@
             imu_topic: "livox/imu"
             con_frame: False                                # True: if you need to combine several LiDAR frames into one
             con_frame_num: 1                                # the number of frames combined
-            cut_frame: False                                # True: if you need to cut one LiDAR frame into several subframes
-            cut_frame_time_interval: 0.1                    # should be integral fraction of 1 / LiDAR frequency
+            cut_frame: True                                 # True: if you need to cut one LiDAR frame into several subframes
+            cut_frame_time_interval: 0.025                  # should be integral fraction of 1 / LiDAR frequency
             time_diff_lidar_to_imu: 0.0                     # Time offset between LiDAR and IMU calibrated by other algorithms, e.g., LI-Init (find in Readme)
 
         prior_pcd:
