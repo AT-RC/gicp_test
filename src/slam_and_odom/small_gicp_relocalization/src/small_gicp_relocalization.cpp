@@ -64,6 +64,9 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->declare_parameter("update_min_translation", 0.03);
   this->declare_parameter("update_min_rotation", 0.02);
 
+  this->declare_parameter("max_divergence_speed", 5.0);
+  this->declare_parameter("max_z_deviation", 0.5);
+
   this->declare_parameter("enable_global_search", false);
 
   this->get_parameter("num_threads", num_threads_);
@@ -101,6 +104,9 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->get_parameter("update_min_translation", update_min_translation_);
   this->get_parameter("update_min_rotation", update_min_rotation_);
 
+  this->get_parameter("max_divergence_speed", max_divergence_speed_);
+  this->get_parameter("max_z_deviation", max_z_deviation_);
+
   this->get_parameter("enable_global_search", enable_global_search_);
 
   // [x, y, z, roll, pitch, yaw] - init_pose parameters
@@ -131,6 +137,12 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   initial_pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
     "initialpose", 10,
     std::bind(&SmallGicpRelocalizationNode::initialPoseCallback, this, std::placeholders::_1));
+
+  odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+    "/aft_mapped_to_init", 10,
+    std::bind(&SmallGicpRelocalizationNode::odometryCallback, this, std::placeholders::_1));
+
+  reset_publisher_ = this->create_publisher<std_msgs::msg::Empty>("/point_lio/reset_state", 10);
 
   // 用一个独立的轻量级线程来跑计算，不占 ROS 线程
   registration_thread_ = std::thread([this]() {
@@ -410,6 +422,59 @@ void SmallGicpRelocalizationNode::initialPoseCallback(
   }
 }
 
+void SmallGicpRelocalizationNode::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
+{
+  if (!global_search_done_) {
+    return;
+  }
+
+  double v_x = msg->twist.twist.linear.x;
+  double v_y = msg->twist.twist.linear.y;
+  double v_z = msg->twist.twist.linear.z;
+  double speed = std::sqrt(v_x * v_x + v_y * v_y + v_z * v_z);
+
+  double z_height = msg->pose.pose.position.z;
+
+  bool is_diverged = false;
+  if (speed > max_divergence_speed_) {
+    RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+      "[DIVERGENCE FAST-KILL] Velocity %.2f m/s exceeds limit (%.2f)! Point-LIO has drifted.", speed, max_divergence_speed_);
+    is_diverged = true;
+  } else if (z_height < -max_z_deviation_ || z_height > max_z_deviation_) {
+    RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+      "[DIVERGENCE FAST-KILL] Z height %.2f exceeds limits [%.2f, %.2f]! Point-LIO has drifted.", z_height, -max_z_deviation_, max_z_deviation_);
+    is_diverged = true;
+  }
+
+  if (is_diverged) {
+    global_search_done_ = false;
+    lost_tracking_count_ = 0;
+    
+    // 1. Immediately reset Point-LIO so it stops publishing garbage
+    std_msgs::msg::Empty reset_msg;
+    reset_publisher_->publish(reset_msg);
+
+    // 2. Freeze the robot's pose in the map to the last known good pose
+    std::lock_guard<std::mutex> lock(pose_mutex_);
+    Eigen::Isometry3d last_good_map_to_base_link = result_t_ * last_good_odom_to_base_link_;
+    // Because Point-LIO is reset, its new odom -> base_link will start from Identity.
+    // To keep map -> base_link continuous, we set map -> odom to the last known map -> base_link.
+    result_t_ = last_good_map_to_base_link;
+    
+    // 3. Clear accumulated garbage points
+    std::lock_guard<std::mutex> cloud_lock(cloud_mutex_);
+    accumulated_cloud_->clear();
+    
+    RCLCPP_WARN(this->get_logger(), "Point-LIO reset early! map->odom frozen to maintain TF tree.");
+  } else {
+    // Record the good odom
+    Eigen::Translation3d t(msg->pose.pose.position.x, msg->pose.pose.position.y, msg->pose.pose.position.z);
+    Eigen::Quaterniond q(msg->pose.pose.orientation.w, msg->pose.pose.orientation.x, msg->pose.pose.orientation.y, msg->pose.pose.orientation.z);
+    std::lock_guard<std::mutex> lock(pose_mutex_);
+    last_good_odom_to_base_link_ = t * q;
+  }
+}
+
 void SmallGicpRelocalizationNode::performGlobalSearch()
 {
   if (!global_map_initialized_) {
@@ -574,11 +639,17 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
 
   if (found_valid) {
     std::lock_guard<std::mutex> lock(pose_mutex_);
+    
+    // Since Point-LIO was already reset at the moment of divergence, 
+    // the accumulated_cloud_ we just matched is relative to the NEW odom frame.
+    // Therefore, best_pose is EXACTLY the new map -> odom_new! No complex math needed.
     previous_result_t_ = result_t_ = best_pose;
     global_search_done_ = true;
+    
     RCLCPP_INFO(this->get_logger(), "==========================================================");
     RCLCPP_INFO(this->get_logger(), "★ ★ ★ GLOBAL INITIALIZATION SUCCESSFUL ★ ★ ★");
     RCLCPP_INFO(this->get_logger(), "Best score: %f. Time taken: %ld ms", best_score, duration);
+    RCLCPP_INFO(this->get_logger(), "Robot snapped to true global pose. Resuming continuous tracking.");
     RCLCPP_INFO(this->get_logger(), "==========================================================");
   } else {
     RCLCPP_WARN(this->get_logger(), "Fine search failed to find a valid pose! Retrying next frame...");

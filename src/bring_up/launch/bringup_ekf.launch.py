@@ -93,7 +93,7 @@ def generate_launch_description():
         name='tf_to_pose_converter',
         output='screen',
         parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time'), 
-            'target_frame': 'base_link_lio',
+            'target_frame': 'odom_lio',
             'source_frame': 'map_gicp',
             'pose_topic': '/gicp_pose',
             'rate': 10.0,

@@ -23,6 +23,8 @@
 #include "pcl/io/pcd_io.h"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
+#include "nav_msgs/msg/odometry.hpp"
+#include "std_msgs/msg/empty.hpp"
 #include "small_gicp/ann/kdtree_omp.hpp"
 #include "small_gicp/factors/gicp_factor.hpp"
 #include "small_gicp/pcl/pcl_point.hpp"
@@ -49,9 +51,12 @@ private:
   void performGlobalSearch();
   void publishTransform();
   void initialPoseCallback(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg);
+  void odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pcd_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initial_pose_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+  rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr reset_publisher_;
 
   int num_threads_;
   int num_neighbors_;
@@ -82,6 +87,9 @@ private:
   double update_min_translation_;
   double update_min_rotation_;
 
+  double max_divergence_speed_;
+  double max_z_deviation_;
+
   bool enable_global_search_;
 
   std::string map_frame_;
@@ -94,6 +102,7 @@ private:
   rclcpp::Time last_scan_time_;
   Eigen::Isometry3d result_t_;
   Eigen::Isometry3d previous_result_t_;
+  Eigen::Isometry3d last_good_odom_to_base_link_{Eigen::Isometry3d::Identity()};
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr global_map_;
   pcl::PointCloud<pcl::PointXYZ>::Ptr registered_scan_;
