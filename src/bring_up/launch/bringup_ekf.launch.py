@@ -23,6 +23,7 @@ def generate_launch_description():
     rviz = LaunchConfiguration('rviz')
 
     # 声明参数
+    declare_use_sim_time = DeclareLaunchArgument('use_sim_time', default_value='false', description='Use simulation (Gazebo) clock if true')
     declare_lio_type = DeclareLaunchArgument('lio_type', default_value='point_lio')
     declare_save_map = DeclareLaunchArgument('save_map', default_value='false')
     declare_localization = DeclareLaunchArgument('localization', default_value='true')
@@ -91,7 +92,7 @@ def generate_launch_description():
         executable='tf_to_pose.py',
         name='tf_to_pose_converter',
         output='screen',
-        parameters=[{'use_sim_time': True, 
+        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time'), 
             'target_frame': 'base_link_lio',
             'source_frame': 'map_gicp',
             'pose_topic': '/gicp_pose',
@@ -106,7 +107,7 @@ def generate_launch_description():
         executable='ekf_node',
         name='ekf_local',
         output='screen',
-        parameters=[PathJoinSubstitution([bring_up_dir, 'config', 'ekf.yaml']), {'use_sim_time': True}],
+        parameters=[PathJoinSubstitution([bring_up_dir, 'config', 'ekf.yaml']), {'use_sim_time': LaunchConfiguration('use_sim_time')}],
         remappings=[('odometry/filtered', 'odometry/local')]
     )
 
@@ -116,7 +117,7 @@ def generate_launch_description():
         executable='ekf_node',
         name='ekf_global',
         output='screen',
-        parameters=[PathJoinSubstitution([bring_up_dir, 'config', 'ekf.yaml']), {'use_sim_time': True}],
+        parameters=[PathJoinSubstitution([bring_up_dir, 'config', 'ekf.yaml']), {'use_sim_time': LaunchConfiguration('use_sim_time')}],
         remappings=[('odometry/filtered', 'odometry/global')]
     )
 
@@ -134,6 +135,14 @@ def generate_launch_description():
         executable='static_transform_publisher',
         name='base_link_to_lidar',
         arguments=['-0.15', '0', '0.138', '0', '0', '1.0', '0', 'base_link', 'lidar']
+    )
+
+    # 10.5 静态 TF 发布 (lidar -> livox_frame，兼容驱动的 IMU/点云坐标系)
+    static_tf_node_livox = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='lidar_to_livox_frame',
+        arguments=['0', '0', '0', '0', '0', '0', 'lidar', 'livox_frame']
     )
 
     # 11. 静态 TF 发布 (隔离的 base_link_lio -> lidar_lio，供 LIO 系统使用)
@@ -155,13 +164,14 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        declare_lio_type, declare_save_map, declare_localization,
+        declare_use_sim_time, declare_lio_type, declare_save_map, declare_localization,
         declare_prior_pcd_file_cmd, declare_enable_global_search, declare_rviz_arg,
         loam_interface_launch,
-        #livox_launch,
-        #point_lio_node,
-        #gicp_launch,
+        livox_launch,
+        point_lio_node,
+        gicp_launch,
         static_tf_node,
+        static_tf_node_livox,
         static_tf_node_lio,
         tf_to_pose_node,
         ekf_local_node,
