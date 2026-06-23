@@ -139,20 +139,6 @@ def generate_launch_description():
         arguments=['-0.16', '0', '0', '0', '0', '1.0', '0', 'base_link', 'lidar']
     )
 
-    # 7.5 启动虚拟串口发送节点 (发送位姿到单片机)
-    serial_node = Node(
-        package='virtual_serial_port',
-        executable='virtual_serial_port_node',
-        name='virtual_serial_port',
-        output='screen',
-        parameters=[{
-            'usb_vid': 0x0483,
-            'usb_pid': 0x5740,
-            'send_interval_ms': 10,
-            'odom_frame': 'odom',  # 根据 SLAM 输出调整，通常为 camera_init 或 odom
-            'base_frame': 'base_link'    # 通常为 aft_mapped 或 base_link
-        }]
-    )
 
     # 8. 启动 RViz
     rviz_config_file = PathJoinSubstitution([bring_up_dir, 'rviz', 'airy.rviz'])
@@ -178,6 +164,5 @@ def generate_launch_description():
         # odom_monitor_node,
         map_monitor_node,
         static_tf_node,
-        # serial_node,
         rviz_node
     ])

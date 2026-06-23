@@ -158,7 +158,7 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   });
 
   transform_timer_ = this->create_wall_timer(
-    std::chrono::milliseconds(50),  // 20 Hz 始终发布 TF
+    std::chrono::milliseconds(10),  // 100 Hz 始终发布 TF
     std::bind(&SmallGicpRelocalizationNode::publishTransform, this));
 
   init_timer_ = this->create_wall_timer(
