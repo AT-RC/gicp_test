@@ -8,7 +8,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 
 install(
-  DIRECTORY config launch rviz
+  DIRECTORY config launch rviz behavior_trees
   DESTINATION share/${PROJECT_NAME}
 )
 

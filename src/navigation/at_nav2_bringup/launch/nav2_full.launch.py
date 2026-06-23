@@ -88,11 +88,7 @@ def generate_launch_description():
     
     declare_params_file_cmd = DeclareLaunchArgument(
         "params_file",
-        default_value=PythonExpression([
-            "'", os.path.join(bringup_dir, "config", "simulation", "nav2_params_teb.yaml"), "' ",
-            "if '", controller_type, "' == 'teb' else '",
-            os.path.join(bringup_dir, "config", "simulation", "nav2_full_params.yaml"), "'"
-        ]),
+        default_value=os.path.join(bringup_dir, "config", "nav2_full_params.yaml"),
         description="Full path to the ROS2 parameters file to use for all launched nodes",
     )
 
@@ -157,16 +153,16 @@ def generate_launch_description():
     load_nodes = GroupAction(
         condition=IfCondition(PythonExpression(["not ", use_composition])),
         actions=[
-            Node(
-                package="loam_interface",
-                executable="loam_interface_node",
-                name="loam_interface",
-                output="screen",
-                respawn=use_respawn,
-                respawn_delay=2.0,
-                parameters=[configured_params],
-                arguments=["--ros-args", "--log-level", log_level],
-            ),
+            # Node(
+            #     package="loam_interface",
+            #     executable="loam_interface_node",
+            #     name="loam_interface",
+            #     output="screen",
+            #     respawn=use_respawn,
+            #     respawn_delay=2.0,
+            #     parameters=[configured_params],
+            #     arguments=["--ros-args", "--log-level", log_level],
+            # ),
             Node(
                 package="sensor_scan_generation",
                 executable="sensor_scan_generation_node",
@@ -284,12 +280,12 @@ def generate_launch_description():
         condition=IfCondition(use_composition),
         target_container=container_name_full,
         composable_node_descriptions=[
-            ComposableNode(
-                package="loam_interface",
-                plugin="loam_interface::LoamInterfaceNode",
-                name="loam_interface",
-                parameters=[configured_params],
-            ),
+            # ComposableNode(
+            #     package="loam_interface",
+            #     plugin="loam_interface::LoamInterfaceNode",
+            #     name="loam_interface",
+            #     parameters=[configured_params],
+            # ),
             ComposableNode(
                 package="sensor_scan_generation",
                 plugin="sensor_scan_generation::SensorScanGenerationNode",
@@ -391,12 +387,14 @@ def generate_launch_description():
     ld.add_action(load_composable_nodes)
 
 
-    # Add the bridge node
     bridge_node = Node(
         package='at_nav2_bridge',
         executable='nav2_cmd_bridge',
         name='nav2_cmd_bridge',
         output='screen',
+        remappings=[
+            ('cmd_vel', 'cmd_vel_nav2_result')
+        ]
     )
     
     ld.add_action(bridge_node)
