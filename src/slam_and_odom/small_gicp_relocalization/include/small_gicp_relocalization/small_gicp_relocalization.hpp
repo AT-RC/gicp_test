@@ -49,6 +49,8 @@ private:
   void initializeGlobalMap();
   void performRegistration();
   void performGlobalSearch();
+  // 把实时帧点云投回原始地图系，裁掉赛场外的人群点（赛场内全留，场外只留天花板）
+  void cropCourtCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr & cloud);
   void publishTransform();
   void initialPoseCallback(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg);
   void odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
@@ -91,6 +93,17 @@ private:
   double max_z_deviation_;
 
   bool enable_global_search_;
+
+  // 赛场实时裁剪：在原始地图系下，赛场框内全保留，框外只留 Z>court_crop_z_min_ 的天花板点
+  bool enable_court_crop_;
+  double court_crop_x_min_;
+  double court_crop_x_max_;
+  double court_crop_y_min_;
+  double court_crop_y_max_;
+  double court_crop_margin_;
+  double court_crop_z_min_;
+  // T_flip = T_{base_frame <- lidar_frame}，initializeGlobalMap 用它预乘地图；裁剪时用其逆把点投回原始地图系
+  Eigen::Isometry3d map_flip_tf_{Eigen::Isometry3d::Identity()};
 
   std::string map_frame_;
   std::string odom_frame_;

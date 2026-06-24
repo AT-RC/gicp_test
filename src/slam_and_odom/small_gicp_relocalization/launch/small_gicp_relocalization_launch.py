@@ -96,6 +96,17 @@ def generate_launch_description():
         "update_min_rotation", default_value="0.05", description="Minimum rotation to update GICP pose (radians)"
     )
 
+    # 赛场实时裁剪参数（原始地图系，与 transform_map.py 的裁剪框保持一致）
+    declare_enable_court_crop = DeclareLaunchArgument(
+        "enable_court_crop", default_value="true", description="Enable runtime court cropping of live scan"
+    )
+    declare_court_crop_x_min = DeclareLaunchArgument("court_crop_x_min", default_value="0.0")
+    declare_court_crop_x_max = DeclareLaunchArgument("court_crop_x_max", default_value="6.0")
+    declare_court_crop_y_min = DeclareLaunchArgument("court_crop_y_min", default_value="-4.0")
+    declare_court_crop_y_max = DeclareLaunchArgument("court_crop_y_max", default_value="0.0")
+    declare_court_crop_margin = DeclareLaunchArgument("court_crop_margin", default_value="0.3")
+    declare_court_crop_z_min = DeclareLaunchArgument("court_crop_z_min", default_value="2.0")
+
     node = Node(
         package="small_gicp_relocalization",
         executable="small_gicp_relocalization_node",
@@ -123,6 +134,13 @@ def generate_launch_description():
                 "continuous_update_rate": continuous_update_rate,
                 "update_min_translation": LaunchConfiguration("update_min_translation"),
                 "update_min_rotation": LaunchConfiguration("update_min_rotation"),
+                "enable_court_crop": LaunchConfiguration("enable_court_crop"),
+                "court_crop_x_min": LaunchConfiguration("court_crop_x_min"),
+                "court_crop_x_max": LaunchConfiguration("court_crop_x_max"),
+                "court_crop_y_min": LaunchConfiguration("court_crop_y_min"),
+                "court_crop_y_max": LaunchConfiguration("court_crop_y_max"),
+                "court_crop_margin": LaunchConfiguration("court_crop_margin"),
+                "court_crop_z_min": LaunchConfiguration("court_crop_z_min"),
             }
         ],
     )
@@ -147,5 +165,12 @@ def generate_launch_description():
         declare_continuous_update_rate,
         declare_update_min_translation,
         declare_update_min_rotation,
+        declare_enable_court_crop,
+        declare_court_crop_x_min,
+        declare_court_crop_x_max,
+        declare_court_crop_y_min,
+        declare_court_crop_y_max,
+        declare_court_crop_margin,
+        declare_court_crop_z_min,
         node
     ])

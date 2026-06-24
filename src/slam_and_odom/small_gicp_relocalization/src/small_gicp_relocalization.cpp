@@ -69,6 +69,15 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
 
   this->declare_parameter("enable_global_search", false);
 
+  // 赛场实时裁剪参数（原始地图系，与 transform_map.py 的裁剪框一致）
+  this->declare_parameter("enable_court_crop", true);
+  this->declare_parameter("court_crop_x_min", 0.0);
+  this->declare_parameter("court_crop_x_max", 6.0);
+  this->declare_parameter("court_crop_y_min", -4.0);
+  this->declare_parameter("court_crop_y_max", 0.0);
+  this->declare_parameter("court_crop_margin", 0.3);
+  this->declare_parameter("court_crop_z_min", 2.0);
+
   this->get_parameter("num_threads", num_threads_);
   this->get_parameter("num_neighbors", num_neighbors_);
   this->get_parameter("global_leaf_size", global_leaf_size_);
@@ -108,6 +117,14 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->get_parameter("max_z_deviation", max_z_deviation_);
 
   this->get_parameter("enable_global_search", enable_global_search_);
+
+  this->get_parameter("enable_court_crop", enable_court_crop_);
+  this->get_parameter("court_crop_x_min", court_crop_x_min_);
+  this->get_parameter("court_crop_x_max", court_crop_x_max_);
+  this->get_parameter("court_crop_y_min", court_crop_y_min_);
+  this->get_parameter("court_crop_y_max", court_crop_y_max_);
+  this->get_parameter("court_crop_margin", court_crop_margin_);
+  this->get_parameter("court_crop_z_min", court_crop_z_min_);
 
   // [x, y, z, roll, pitch, yaw] - init_pose parameters
   if (!init_pose_.empty() && init_pose_.size() >= 6) {
@@ -206,6 +223,9 @@ void SmallGicpRelocalizationNode::initializeGlobalMap()
 
   pcl::transformPointCloud(*global_map_, *global_map_, odom_to_lidar_odom);
 
+  // 保存这个翻转变换，实时裁剪时用其逆把 source 点从翻转系投回原始地图系
+  map_flip_tf_ = Eigen::Isometry3d(odom_to_lidar_odom.matrix());
+
   // Downsample points and convert them into pcl::PointCloud<pcl::PointCovariance>
   target_ = small_gicp::voxelgrid_sampling_omp<
     pcl::PointCloud<pcl::PointXYZ>, pcl::PointCloud<pcl::PointCovariance>>(
@@ -252,6 +272,16 @@ void SmallGicpRelocalizationNode::performRegistration()
     }
     // 极速交换指针 (O(1))，而不是拷贝整个点云 (O(N))
     std::swap(accumulated_cloud_, cloud_to_process);
+  }
+
+  // 赛场裁剪：把人群点滤掉，只让赛场内的点和场外天花板参与匹配
+  if (enable_court_crop_) {
+    cropCourtCloud(cloud_to_process);
+    if (cloud_to_process->empty()) {
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+        "Court crop removed all points this frame, skipping registration.");
+      return;
+    }
   }
 
   source_ = small_gicp::voxelgrid_sampling_omp<
@@ -490,6 +520,50 @@ void SmallGicpRelocalizationNode::odometryCallback(const nav_msgs::msg::Odometry
     std::lock_guard<std::mutex> lock(pose_mutex_);
     last_good_odom_to_base_link_ = t * q;
   }
+}
+
+void SmallGicpRelocalizationNode::cropCourtCloud(
+  pcl::PointCloud<pcl::PointXYZ>::Ptr & cloud)
+{
+  if (cloud->empty()) {
+    return;
+  }
+
+  // source 点在 odom 系。先用当前位姿估计投到 target（翻转）系，再用 T_flip 逆投回原始地图系，
+  // 这样就能直接用 transform_map.py 那套地图系坐标做判定，无需手动镜像。
+  Eigen::Isometry3d src_to_map;
+  {
+    std::lock_guard<std::mutex> lock(pose_mutex_);
+    src_to_map = map_flip_tf_.inverse() * previous_result_t_;
+  }
+
+  const double x_min = court_crop_x_min_ - court_crop_margin_;
+  const double x_max = court_crop_x_max_ + court_crop_margin_;
+  const double y_min = court_crop_y_min_ - court_crop_margin_;
+  const double y_max = court_crop_y_max_ + court_crop_margin_;
+
+  pcl::PointCloud<pcl::PointXYZ>::Ptr kept(new pcl::PointCloud<pcl::PointXYZ>());
+  kept->points.reserve(cloud->points.size());
+
+  for (const auto & pt : cloud->points) {
+    Eigen::Vector3d p_map = src_to_map * Eigen::Vector3d(pt.x, pt.y, pt.z);
+    bool in_court = (p_map.x() >= x_min && p_map.x() <= x_max &&
+                     p_map.y() >= y_min && p_map.y() <= y_max);
+    bool high_enough = p_map.z() > court_crop_z_min_;
+    if (in_court || high_enough) {
+      kept->points.push_back(pt);
+    }
+  }
+
+  kept->width = kept->points.size();
+  kept->height = 1;
+  kept->is_dense = cloud->is_dense;
+  kept->header = cloud->header;
+
+  RCLCPP_DEBUG_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+    "Court crop: kept %zu / %zu points.", kept->points.size(), cloud->points.size());
+
+  cloud.swap(kept);
 }
 
 void SmallGicpRelocalizationNode::performGlobalSearch()
