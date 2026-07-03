@@ -5,6 +5,111 @@ import math
 import argparse
 import os
 
+def build_grid_points(nx, ny, spacing_m):
+    grid_points = []
+    for i in range(nx):
+        for j in range(ny):
+            grid_points.append([i * spacing_m, j * spacing_m, 0.0])
+    return np.array(grid_points)
+
+def extract_box_features(pcd, points, crop_x, crop_y, crop_z, eps):
+    x = points[:, 0]
+    y = points[:, 1]
+    z = points[:, 2]
+    valid_indices = np.where((x >= crop_x[0]) & (x <= crop_x[1]) &
+                             (y >= crop_y[0]) & (y <= crop_y[1]) &
+                             (z >= crop_z[0]) & (z <= crop_z[1]))[0]
+    non_ground_pcd = pcd.select_by_index(valid_indices)
+
+    if len(non_ground_pcd.points) == 0:
+        return non_ground_pcd, np.empty((0, 3)), [], 0, 0
+
+    with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Warning):
+        labels = np.array(non_ground_pcd.cluster_dbscan(eps=eps, min_points=10))
+
+    valid_labels = labels[labels >= 0]
+    cluster_count = int(valid_labels.max() + 1) if len(valid_labels) else 0
+    box_centroids = []
+    box_point_indices = []
+
+    for i in range(cluster_count):
+        cluster_indices = np.where(labels == i)[0]
+        cluster_pcd = non_ground_pcd.select_by_index(cluster_indices)
+        aabb = cluster_pcd.get_axis_aligned_bounding_box()
+        extent = aabb.get_extent()
+
+        # 25cm 箱子在单帧/建图点云中会有缺面，但不应在 X/Y 上超过 45cm。
+        if extent[0] < 0.45 and extent[1] < 0.45 and max(extent[0], extent[1]) > 0.08:
+            box_centroids.append(aabb.get_center())
+            box_point_indices.append(cluster_indices.tolist())
+
+    return non_ground_pcd, np.array(box_centroids), box_point_indices, len(valid_indices), cluster_count
+
+def match_grid(box_centroids, spacing_m):
+    best = {
+        "match_count": 0,
+        "error": float('inf'),
+        "transform": np.eye(4),
+        "angle": 0,
+        "layout": (2, 4),
+        "grid_points": build_grid_points(2, 4, spacing_m),
+    }
+
+    if len(box_centroids) == 0:
+        return best
+
+    # 同时尝试 2x4 与 4x2。不同地图的阵列长边可能落在不同坐标轴上。
+    for layout in [(2, 4), (4, 2)]:
+        grid_points = build_grid_points(layout[0], layout[1], spacing_m)
+
+        for angle_deg in range(-45, 45):
+            theta = np.radians(angle_deg)
+            R = np.array([
+                [np.cos(theta), -np.sin(theta), 0],
+                [np.sin(theta),  np.cos(theta), 0],
+                [0,             0,              1]
+            ])
+
+            rotated_grid = np.dot(grid_points, R.T)
+
+            for t in range(len(grid_points)):
+                for c in range(len(box_centroids)):
+                    translation = box_centroids[c] - rotated_grid[t]
+                    translation[2] = 0
+
+                    match_count = 0
+                    error = 0.0
+                    for p in rotated_grid:
+                        shifted_p = p + translation
+                        dists = np.linalg.norm(box_centroids[:, :2] - shifted_p[:2], axis=1)
+                        min_dist = np.min(dists)
+
+                        if min_dist < 0.20:
+                            match_count += 1
+                            error += min_dist
+
+                    is_better = match_count > best["match_count"]
+                    if match_count == best["match_count"]:
+                        if abs(error - best["error"]) < 0.02:
+                            is_better = abs(angle_deg) < abs(best["angle"])
+                        else:
+                            is_better = error < best["error"]
+
+                    if is_better:
+                        T = np.eye(4)
+                        T[:3, :3] = R
+                        T[:3, 3] = translation
+                        best = {
+                            "match_count": match_count,
+                            "error": error,
+                            "transform": T,
+                            "angle": angle_deg,
+                            "layout": layout,
+                            "grid_points": grid_points,
+                        }
+
+    return best
+
 def main():
     parser = argparse.ArgumentParser(description="基于 2D 鸟瞰图与模板匹配的靶向定位对齐")
     parser.add_argument("input", help="输入点云文件 (例如: 1.pcd)")
@@ -30,140 +135,81 @@ def main():
     pcd = o3d.io.read_point_cloud(input_file)
     points = np.asarray(pcd.points)
     
-    # --- 1. 裁剪点云范围 ---
-    x = points[:, 0]
-    y = points[:, 1]
-    z = points[:, 2]
-    
     # ============ 赛场快调区：裁剪窗口（雷达坐标系，单位 m）============
     # 阵列必须落在这个 x/y 框内。换场地 / 起步位置变了，只改下面 6 个数即可。
     # 定法：先 pcl_viewer 看阵列大概在哪，框住它再各留 ~0.4m 余量。
-    CROP_X = (-0.5, 4.0)    # 阵列 X 范围
-    CROP_Y = (-0.5, 1.0)    # 阵列 Y 范围
-    CROP_Z = (-0.15, 0.3)   # 高度：下界滤地面，上界滤比箱子高的墙/人
+    CROP_X = (0.0, 4.0)    # 阵列 X 范围
+    CROP_Y = (0.5, 3.0)    # 阵列 Y 范围
+    CROP_Z_CANDIDATES = [
+        (-0.15, 0.30),  # 兼容旧地图：箱子点偏低
+        (0.00, 0.30),
+        (0.03, 0.25),
+        (0.05, 0.25),   # 过滤低处连接带
+        (0.10, 0.30),   # 兼容 fin11：箱子底部/地面点会把簇粘在一起
+    ]
+    DBSCAN_EPS_CANDIDATES = [0.06, 0.08, 0.10, 0.12, 0.15]
     # ===================================================================
-    valid_indices = np.where((x >= CROP_X[0]) & (x <= CROP_X[1]) &
-                             (y >= CROP_Y[0]) & (y <= CROP_Y[1]) &
-                             (z >= CROP_Z[0]) & (z <= CROP_Z[1]))[0]
-    non_ground_pcd = pcd.select_by_index(valid_indices)
-    
-    if len(non_ground_pcd.points) == 0:
-        print("错误：裁剪窗口内没有任何有效点云（检查 CROP_X/Y/Z 是否框住了阵列）")
-        return
-        
+
     # --- 2. 聚类并严格过滤掉“墙壁”等干扰物 ---
     print("2. 正在聚类并剔除墙壁等大型干扰物...")
-    # eps=0.15 (15cm内算连通), min_points=10
-    with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Warning) as cm:
-        labels = np.array(non_ground_pcd.cluster_dbscan(eps=0.15, min_points=10))
-        
-    if len(labels) == 0:
-        print("错误：未找到任何聚类物体")
-        return
-
-    max_label = labels.max()
-    box_centroids = []
-    box_point_indices = []  # 记录“确认是箱子”的点索引，后面只把这些干净的点喂给 ICP
-    
-    for i in range(max_label + 1):
-        cluster_indices = np.where(labels == i)[0]
-        cluster_pcd = non_ground_pcd.select_by_index(cluster_indices)
-        aabb = cluster_pcd.get_axis_aligned_bounding_box()
-        extent = aabb.get_extent()
-        
-        # 核心过滤：只要 X 或 Y 长度超过 45cm，它就绝对不可能是 25cm 的箱子！
-        # 这个条件会把所有的墙壁、长条状杂物、人的双腿等全部过滤掉！
-        # 上限：超过 45cm 绝不是 25cm 的箱子（剔墙/长条杂物/人腿）
-        # 下限：至少一条边 > 8cm，剔除零星噪点小团块（避免假特征点污染匹配与 ICP）
-        if extent[0] < 0.45 and extent[1] < 0.45 and max(extent[0], extent[1]) > 0.08:
-            box_centroids.append(aabb.get_center())
-            box_point_indices.extend(cluster_indices.tolist())
-            
-    box_centroids = np.array(box_centroids)
-    print(f"经过严苛筛选，提取到了 {len(box_centroids)} 个疑似箱子的特征点。")
-    
-    if len(box_centroids) == 0:
-        print("提取失败：所有的聚类物体都太大或太小，不符合箱子特征。")
-        return
-
-    # --- 3. 生成完美的 2x4 坐标系骨架 ---
-    print("3. 正在进行几何拓扑图硬匹配 (完全无视无关杂物)...")
     spacing_m = 0.85
-    grid_points = []
-    # 以第一个箱子为 (0,0,0)，X 轴 2 个，Y 轴 4 个
-    for i in range(2):
-        for j in range(4):
-            grid_points.append([i * spacing_m, j * spacing_m, 0.0])
-    grid_points = np.array(grid_points)
+    candidates = []
+    for crop_z in CROP_Z_CANDIDATES:
+        for eps in DBSCAN_EPS_CANDIDATES:
+            non_ground, centroids, point_indices, crop_count, cluster_count = extract_box_features(
+                pcd, points, CROP_X, CROP_Y, crop_z, eps
+            )
+            match = match_grid(centroids, spacing_m)
+            candidates.append({
+                "crop_z": crop_z,
+                "eps": eps,
+                "non_ground": non_ground,
+                "centroids": centroids,
+                "point_indices": point_indices,
+                "crop_count": crop_count,
+                "cluster_count": cluster_count,
+                "match": match,
+            })
+            print(f"  Z={crop_z}, eps={eps:.2f}: 裁剪 {crop_count} 点, 聚类 {cluster_count} 个, "
+                  f"箱子候选 {len(centroids)} 个, 可匹配 {match['match_count']} 个, "
+                  f"模板 {match['layout'][0]}x{match['layout'][1]}")
 
-    # --- 4. 暴力搜索最优阵列映射 ---
-    best_match_count = 0
-    best_error = float('inf')
-    best_transform = np.eye(4)
-    best_angle = 0
-    
-    # 扩大搜索范围到 360 度，解决初始建图方向未知或偏差大的问题！
-    # 同时在内部通过“就近原则”智能识别并解决 180 度对称翻转的歧义，保持地图原有大方向。
-    for angle_deg in range(-45, 45):
-        theta = np.radians(angle_deg)
-        R = np.array([
-            [np.cos(theta), -np.sin(theta), 0],
-            [np.sin(theta),  np.cos(theta), 0],
-            [0,             0,              1]
-        ])
-        
-        rotated_grid = np.dot(grid_points, R.T)
-        
-        # 穷举所有的对应关系：假设雷达扫到的第 c 个特征点，就是理想骨架里的第 t 个箱子
-        for t in range(8):
-            for c in range(len(box_centroids)):
-                # 计算出必须的平移量
-                translation = box_centroids[c] - rotated_grid[t]
-                translation[2] = 0 # 保持在地面上
-                
-                # 检查在这个位姿下，8个理想箱子有几个能和雷达扫到的特征点对上
-                match_count = 0
-                error = 0.0
-                for p in rotated_grid:
-                    shifted_p = p + translation
-                    # 计算这个理想箱子离所有雷达特征点的最小距离
-                    dists = np.linalg.norm(box_centroids[:, :2] - shifted_p[:2], axis=1)
-                    min_dist = np.min(dists)
-                    
-                    if min_dist < 0.20: # 误差在 20cm 内就算完美重合
-                        match_count += 1
-                        error += min_dist
-                        
-                # 记录得分最高的那个变换矩阵
-                if match_count > best_match_count:
-                    best_match_count = match_count
-                    best_error = error
-                    best_angle = angle_deg
-                    
-                    T = np.eye(4)
-                    T[:3, :3] = R
-                    T[:3, 3] = translation
-                    best_transform = T
-                elif match_count == best_match_count:
-                    # 处理对称性：如果命中数一样，看误差
-                    # 如果误差极其接近（相差不到 2cm），说明遇到了 180 度对称的等价匹配！
-                    # 此时优先选择角度绝对值更接近 0 的，从而防止地图发生 180 度的非预期大翻转。
-                    if abs(error - best_error) < 0.02:
-                        if abs(angle_deg) < abs(best_angle):
-                            best_error = error
-                            best_angle = angle_deg
-                            T = np.eye(4)
-                            T[:3, :3] = R
-                            T[:3, 3] = translation
-                            best_transform = T
-                    # 如果不是对称，纯粹是当前位姿误差更小，则直接更新
-                    elif error < best_error:
-                        best_error = error
-                        best_angle = angle_deg
-                        T = np.eye(4)
-                        T[:3, :3] = R
-                        T[:3, 3] = translation
-                        best_transform = T
+    candidates.sort(key=lambda item: (
+        item["match"]["match_count"],
+        len(item["centroids"]),
+        -item["match"]["error"]
+    ), reverse=True)
+    selected = candidates[0]
+    non_ground_pcd = selected["non_ground"]
+    box_centroids = selected["centroids"]
+    best_match = selected["match"]
+    best_match_count = best_match["match_count"]
+    best_error = best_match["error"]
+    best_transform = best_match["transform"]
+    best_angle = best_match["angle"]
+    grid_points = best_match["grid_points"]
+    layout_x, layout_y = best_match["layout"]
+
+    matched_grid = np.dot(grid_points, best_transform[:3, :3].T) + best_transform[:3, 3]
+    matched_box_indices = []
+    for i, centroid in enumerate(box_centroids):
+        dists = np.linalg.norm(matched_grid[:, :2] - centroid[:2], axis=1)
+        if np.min(dists) < 0.20:
+            matched_box_indices.extend(selected["point_indices"][i])
+    if not matched_box_indices:
+        for indices in selected["point_indices"]:
+            matched_box_indices.extend(indices)
+    box_point_indices = matched_box_indices
+
+    print(f"采用 Z={selected['crop_z']}，eps={selected['eps']:.2f}，提取到 {len(box_centroids)} 个疑似箱子，"
+          f"使用 {layout_x}x{layout_y} 模板。")
+
+    if len(box_centroids) == 0:
+        print("提取失败：所有裁剪窗口里都没有符合箱子尺寸的聚类物体。")
+        return
+
+    # --- 3. 选择最匹配的 2x4 / 4x2 坐标系骨架 ---
+    print("3. 正在进行几何拓扑图硬匹配 (完全无视无关杂物)...")
 
     print(f"\n匹配结束！在您的雷达特征中成功对齐了 {best_match_count} 个箱子。")
     if best_match_count < 3:
@@ -184,8 +230,8 @@ def main():
     
     template_points = []
     # 严格绘制 8 个完美的空心正方形（模拟箱子的墙壁）
-    for i in range(2):
-        for j in range(4):
+    for i in range(layout_x):
+        for j in range(layout_y):
             cx_box = i * 0.85
             cy_box = j * 0.85
             half_l = 0.125 # 25cm 边长的一半
@@ -208,12 +254,12 @@ def main():
     # 先用刚才算出来的粗矩阵，把点云大概摆正
     raw_pcd2d.transform(coarse_transform)
 
-    # 摆正后，阵列已落在原点附近（箱心 x∈[0,0.85] y∈[0,2.55]）。
+    # 摆正后，阵列已落在原点附近。
     # 在这个“已对齐坐标系”里裁掉远处杂物再做 ICP——这是相对阵列裁剪，跟雷达位置无关，
     # 所以换任何起始位姿都不会框错，也避免远处杂簇把 fitness 拉低误触发警告。
     ap = np.asarray(raw_pcd2d.points)
-    near = np.where((ap[:,0] >= -0.6) & (ap[:,0] <= 1.5) &
-                    (ap[:,1] >= -0.6) & (ap[:,1] <= 3.2))[0]
+    near = np.where((ap[:,0] >= -0.6) & (ap[:,0] <= (layout_x - 1) * spacing_m + 0.6) &
+                    (ap[:,1] >= -0.6) & (ap[:,1] <= (layout_y - 1) * spacing_m + 0.6))[0]
     raw_pcd2d = raw_pcd2d.select_by_index(near)
     
     # 启动极致精度的 ICP (Iterative Closest Point)
