@@ -6,6 +6,7 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, Pyth
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
+
 def generate_launch_description():
     # 1. 获取各个包的路径
     livox_driver_dir = get_package_share_directory('livox_ros_driver2')
@@ -43,7 +44,7 @@ def generate_launch_description():
 
     declare_prior_pcd_file_cmd = DeclareLaunchArgument(
         "prior_pcd_file",
-        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "new_map4.pcd"]),
+        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "scans_1.pcd"]),
         description="Full path to prior PCD file to load",
     )
 
@@ -97,7 +98,13 @@ def generate_launch_description():
             'odom_frame': 'odom',
             'base_frame': 'base_link',
             'lidar_frame': 'lidar',
-            'enable_global_search': enable_global_search
+            'enable_global_search': enable_global_search,
+            'map_filter_x_min': '-10.0',
+            'map_filter_x_max': '10.0',
+            'map_filter_y_min': '-6.0',
+            'map_filter_y_max': '6.0',
+            'max_z_deviation': '1.5',
+            'enable_court_crop': 'false'
         }.items()
     )
 
@@ -136,23 +143,8 @@ def generate_launch_description():
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_link_to_lidar',
-        arguments=['-0.15', '0', '0.138', '0', '0', '1.0', '0', 'base_link', 'lidar']
+        arguments=['-0.16', '0', '0', '0', '0', '1.0', '0', 'base_link', 'lidar']
     )
-
-    # # 7.5 启动虚拟串口发送节点 (发送位姿到单片机)
-    # serial_node = Node(
-    #     package='virtual_serial_port',
-    #     executable='virtual_serial_port_node',
-    #     name='virtual_serial_port',
-    #     output='screen',
-    #     parameters=[{
-    #         'usb_vid': 0x0483,
-    #         'usb_pid': 0x5740,
-    #         'send_interval_ms': 10,
-    #         'odom_frame': 'odom',  # 根据 SLAM 输出调整，通常为 camera_init 或 odom
-    #         'base_frame': 'base_link'    # 通常为 aft_mapped 或 base_link
-    #     }]
-    # )
 
     # 8. 启动 RViz
     rviz_config_file = PathJoinSubstitution([bring_up_dir, 'rviz', 'airy.rviz'])
@@ -178,6 +170,5 @@ def generate_launch_description():
         # odom_monitor_node,
         map_monitor_node,
         static_tf_node,
-        # serial_node,
         rviz_node
     ])

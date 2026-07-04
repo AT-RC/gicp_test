@@ -43,6 +43,7 @@ def generate_launch_description():
     prior_pcd_file = LaunchConfiguration("prior_pcd_file")
     enable_global_search = LaunchConfiguration("enable_global_search")
     continuous_update_rate = LaunchConfiguration("continuous_update_rate")
+    max_z_deviation = LaunchConfiguration("max_z_deviation")
 
     declare_num_threads = DeclareLaunchArgument(
         "num_threads", default_value="4", description="Number of threads"
@@ -95,6 +96,9 @@ def generate_launch_description():
     declare_update_min_rotation = DeclareLaunchArgument(
         "update_min_rotation", default_value="0.05", description="Minimum rotation to update GICP pose (radians)"
     )
+    declare_max_z_deviation = DeclareLaunchArgument(
+        "max_z_deviation", default_value="0.5", description="Maximum allowed odometry Z deviation before reset (meters)"
+    )
 
     # 赛场实时裁剪参数（原始地图系，与 transform_map.py 的裁剪框保持一致）
     declare_enable_court_crop = DeclareLaunchArgument(
@@ -134,6 +138,7 @@ def generate_launch_description():
                 "continuous_update_rate": continuous_update_rate,
                 "update_min_translation": LaunchConfiguration("update_min_translation"),
                 "update_min_rotation": LaunchConfiguration("update_min_rotation"),
+                "max_z_deviation": max_z_deviation,
                 "enable_court_crop": LaunchConfiguration("enable_court_crop"),
                 "court_crop_x_min": LaunchConfiguration("court_crop_x_min"),
                 "court_crop_x_max": LaunchConfiguration("court_crop_x_max"),
@@ -165,6 +170,7 @@ def generate_launch_description():
         declare_continuous_update_rate,
         declare_update_min_translation,
         declare_update_min_rotation,
+        declare_max_z_deviation,
         declare_enable_court_crop,
         declare_court_crop_x_min,
         declare_court_crop_x_max,

@@ -21,3 +21,37 @@
 [CodeGraph MCP] File watcher active — graph will auto-sync on changes
 [CodeGraph MCP] Caught up 1 file(s) changed since last run
 [CodeGraph daemon] Shutting down (inactivity backstop; clients=1).
+[CodeGraph daemon] Listening on /home/xjh/Desktop/at_rc/.codegraph/daemon.sock (pid 51147, v1.0.1). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph MCP] Caught up 1 file(s) changed since last run
+[CodeGraph MCP] Auto-synced 4 file(s) in 195ms
+[CodeGraph MCP] Auto-synced 1 file(s) in 153ms
+[CodeGraph MCP] Auto-synced 2 file(s) in 129ms
+[CodeGraph MCP] Auto-synced 4 file(s) in 166ms
+[CodeGraph MCP] Auto-synced 1 file(s) in 108ms
+[CodeGraph daemon] Shutting down (inactivity backstop; clients=1).
+[CodeGraph daemon] Listening on /home/xjh/Desktop/at_rc/.codegraph/daemon.sock (pid 14833, v1.0.1). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph MCP] Auto-synced 1 file(s) in 256ms
+[CodeGraph MCP] Auto-synced 30 file(s) in 143ms
+[CodeGraph MCP] Auto-synced 1 file(s) in 99ms
+[CodeGraph MCP] Auto-synced 1 file(s) in 107ms
+[CodeGraph MCP] Auto-synced 2 file(s) in 110ms
+[CodeGraph MCP] Auto-synced 2 file(s) in 128ms
+[CodeGraph MCP] Auto-synced 1 file(s) in 117ms
+[CodeGraph MCP] Auto-synced 1 file(s) in 97ms
+[CodeGraph MCP] Auto-synced 1 file(s) in 77ms
+[CodeGraph MCP] Auto-synced 1 file(s) in 85ms
+[CodeGraph MCP] Auto-synced 2 file(s) in 91ms
+[CodeGraph MCP] Auto-synced 1 file(s) in 87ms
+[CodeGraph MCP] Auto-synced 1 file(s) in 66ms
+[CodeGraph MCP] Auto-synced 2 file(s) in 302ms
+[CodeGraph MCP] Auto-synced 1 file(s) in 111ms
+[CodeGraph MCP] Auto-synced 2 file(s) in 119ms
+[CodeGraph MCP] Auto-synced 1 file(s) in 76ms
+[CodeGraph MCP] Auto-synced 1 file(s) in 104ms
+[CodeGraph MCP] Auto-synced 2 file(s) in 81ms
+[CodeGraph MCP] Auto-synced 1 file(s) in 103ms
+[CodeGraph MCP] Auto-synced 1 file(s) in 100ms
+[CodeGraph MCP] Auto-synced 2 file(s) in 81ms
+[CodeGraph MCP] Auto-synced 1 file(s) in 82ms
