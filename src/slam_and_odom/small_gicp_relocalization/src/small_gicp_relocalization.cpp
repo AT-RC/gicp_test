@@ -40,6 +40,7 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->declare_parameter("base_frame", "");
   this->declare_parameter("robot_base_frame", "");
   this->declare_parameter("lidar_frame", "");
+  this->declare_parameter("odom_topic", "/aft_mapped_to_init");
   this->declare_parameter("prior_pcd_file", "");
   this->declare_parameter("init_pose", std::vector<double>{0., 0., 0., 0., 0., 0.});
 
@@ -89,6 +90,7 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->get_parameter("base_frame", base_frame_);
   this->get_parameter("robot_base_frame", robot_base_frame_);
   this->get_parameter("lidar_frame", lidar_frame_);
+  this->get_parameter("odom_topic", odom_topic_);
   this->get_parameter("prior_pcd_file", prior_pcd_file_);
   this->get_parameter("init_pose", init_pose_);
 
@@ -156,7 +158,7 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
     std::bind(&SmallGicpRelocalizationNode::initialPoseCallback, this, std::placeholders::_1));
 
   odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-    "/aft_mapped_to_init", 10,
+    odom_topic_, 10,
     std::bind(&SmallGicpRelocalizationNode::odometryCallback, this, std::placeholders::_1));
 
   reset_publisher_ = this->create_publisher<std_msgs::msg::Empty>("/point_lio/reset_state", 10);

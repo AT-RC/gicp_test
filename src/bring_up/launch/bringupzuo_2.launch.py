@@ -20,6 +20,7 @@ def generate_launch_description():
     localization = LaunchConfiguration('localization')
     prior_pcd_file = LaunchConfiguration("prior_pcd_file")
     enable_global_search = LaunchConfiguration('enable_global_search')
+    enable_court_crop = LaunchConfiguration('enable_court_crop')
     rviz = LaunchConfiguration('rviz')
 
     # 声明参数
@@ -57,6 +58,12 @@ def generate_launch_description():
         'enable_global_search',
         default_value='true',
         description='Whether to enable full map global search for GICP'
+    )
+
+    declare_enable_court_crop = DeclareLaunchArgument(
+        'enable_court_crop',
+        default_value='true',
+        description='Whether to crop live scan points before continuous GICP'
     )
 
     # 2. 包含 Livox Mid360 雷达驱动 Launch
@@ -97,7 +104,9 @@ def generate_launch_description():
             'odom_frame': 'odom',
             'base_frame': 'base_link',
             'lidar_frame': 'lidar',
-            'enable_global_search': enable_global_search
+            'odom_topic': '/odometry',
+            'enable_global_search': enable_global_search,
+            'enable_court_crop': enable_court_crop
         }.items()
     )
 
@@ -170,6 +179,7 @@ def generate_launch_description():
         declare_localization,
         declare_prior_pcd_file_cmd,
         declare_enable_global_search,
+        declare_enable_court_crop,
         declare_rviz_arg,
         loam_interface_launch,
         livox_launch,

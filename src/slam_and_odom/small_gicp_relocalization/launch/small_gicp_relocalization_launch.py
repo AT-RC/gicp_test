@@ -40,6 +40,7 @@ def generate_launch_description():
     base_frame = LaunchConfiguration("base_frame")
     lidar_frame = LaunchConfiguration("lidar_frame")
     robot_base_frame = LaunchConfiguration("robot_base_frame")
+    odom_topic = LaunchConfiguration("odom_topic")
     prior_pcd_file = LaunchConfiguration("prior_pcd_file")
     enable_global_search = LaunchConfiguration("enable_global_search")
     continuous_update_rate = LaunchConfiguration("continuous_update_rate")
@@ -74,6 +75,9 @@ def generate_launch_description():
     )
     declare_robot_base_frame = DeclareLaunchArgument(
         "robot_base_frame", default_value="base_link", description="Robot base frame"
+    )
+    declare_odom_topic = DeclareLaunchArgument(
+        "odom_topic", default_value="/aft_mapped_to_init", description="Odometry topic for divergence detection"
     )
     declare_map_filter_x_min = DeclareLaunchArgument("map_filter_x_min", default_value="-1.0")
     declare_map_filter_x_max = DeclareLaunchArgument("map_filter_x_max", default_value="7.0")
@@ -129,6 +133,7 @@ def generate_launch_description():
                 "base_frame": base_frame,
                 "lidar_frame": lidar_frame,
                 "robot_base_frame": robot_base_frame,
+                "odom_topic": odom_topic,
                 "map_filter_x_min": LaunchConfiguration("map_filter_x_min"),
                 "map_filter_x_max": LaunchConfiguration("map_filter_x_max"),
                 "map_filter_y_min": LaunchConfiguration("map_filter_y_min"),
@@ -161,6 +166,7 @@ def generate_launch_description():
         declare_base_frame,
         declare_lidar_frame,
         declare_robot_base_frame,
+        declare_odom_topic,
         declare_map_filter_x_min,
         declare_map_filter_x_max,
         declare_map_filter_y_min,
