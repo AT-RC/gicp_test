@@ -88,6 +88,7 @@ def generate_launch_description():
         }],
         remappings=[
             ('/aft_mapped_to_init', '/odometry'),
+            ('/point_lio/reset_state', '/point_lio/reset_state_disabled'),
             ('/tf', 'tf'),
             ('/tf_static', 'tf_static')
         ]

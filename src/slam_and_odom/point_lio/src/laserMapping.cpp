@@ -435,6 +435,7 @@ int main(int argc, char ** argv)
         init_map = false;
         first_lidar_time = 0;
         first_imu_time = 0;
+        Measures.imu.clear();
         imu_deque.clear();
 
         {

@@ -257,7 +257,7 @@ bool sync_packages(MeasureGroup & meas)
       if (p_imu->imu_need_init_) {
         double imu_time = get_time_sec(imu_deque.front()->header.stamp);
         imu_next = *(imu_deque.front());
-        meas.imu.shrink_to_fit();
+        meas.imu.clear();
         while (imu_time < lidar_end_time) {
           meas.imu.emplace_back(imu_deque.front());
           imu_last = imu_next;
@@ -274,7 +274,7 @@ bool sync_packages(MeasureGroup & meas)
       /*** push imu data, and pop from imu buffer ***/
       if (p_imu->imu_need_init_) {
         double imu_time = get_time_sec(imu_deque.front()->header.stamp);
-        meas.imu.shrink_to_fit();
+        meas.imu.clear();
 
         imu_next = *(imu_deque.front());
         while (imu_time < meas.lidar_beg_time + lidar_time_inte) {
