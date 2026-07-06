@@ -208,25 +208,7 @@ void SmallGicpRelocalizationNode::initializeGlobalMap()
     return;
   }
 
-  Eigen::Affine3d odom_to_lidar_odom;
-  try {
-    auto tf_stamped = tf_buffer_->lookupTransform(
-      base_frame_, lidar_frame_, tf2::TimePointZero);
-    odom_to_lidar_odom = tf2::transformToEigen(tf_stamped.transform);
-    RCLCPP_INFO_STREAM(
-      this->get_logger(), "odom_to_lidar_odom: translation = "
-                            << odom_to_lidar_odom.translation().transpose() << ", rpy = "
-                            << odom_to_lidar_odom.rotation().eulerAngles(0, 1, 2).transpose());
-  } catch (tf2::TransformException & ex) {
-    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
-                         "Initial TF lookup failed: %s. Retrying...", ex.what());
-    return;
-  }
-
-  pcl::transformPointCloud(*global_map_, *global_map_, odom_to_lidar_odom);
-
-  // 保存这个翻转变换，实时裁剪时用其逆把 source 点从翻转系投回原始地图系
-  map_flip_tf_ = Eigen::Isometry3d(odom_to_lidar_odom.matrix());
+  map_flip_tf_ = Eigen::Isometry3d::Identity();
 
   // Downsample points and convert them into pcl::PointCloud<pcl::PointCovariance>
   target_ = small_gicp::voxelgrid_sampling_omp<

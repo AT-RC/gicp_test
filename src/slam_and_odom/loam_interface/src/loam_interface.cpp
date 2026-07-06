@@ -56,18 +56,9 @@ LoamInterfaceNode::LoamInterfaceNode(const rclcpp::NodeOptions & options)
 
 void LoamInterfaceNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
 {
-  if (!base_frame_to_lidar_initialized_) {
-    RCLCPP_WARN_THROTTLE(
-      this->get_logger(), *this->get_clock(), 2000,
-      "Waiting for base->lidar TF before publishing registered_scan.");
-    return;
-  }
-
-  // NOTE: Input point cloud message is based on the `lidar_odom`
-  // Here we transform it to the REAL `odom` frame
-  auto out = std::make_shared<sensor_msgs::msg::PointCloud2>();
-  pcl_ros::transformPointCloud(odom_frame_, tf_odom_to_lidar_odom_, *msg, *out);
-  pcd_pub_->publish(*out);
+  auto out = *msg;
+  out.header.frame_id = odom_frame_;
+  pcd_pub_->publish(out);
 }
 
 void LoamInterfaceNode::odometryCallback(const nav_msgs::msg::Odometry::ConstSharedPtr msg)
@@ -88,13 +79,12 @@ void LoamInterfaceNode::odometryCallback(const nav_msgs::msg::Odometry::ConstSha
     }
   }
 
-  // Transform the odometry_msg (based lidar_odom) to the odom frame
-  tf2::Transform tf_lidar_odom_to_lidar;
-  tf2::fromMsg(msg->pose.pose, tf_lidar_odom_to_lidar);
-  tf2::Transform tf_odom_to_lidar = tf_odom_to_lidar_odom_ * tf_lidar_odom_to_lidar;
-
-  // Transform from odom to base_frame
-  tf2::Transform tf_odom_to_base = tf_odom_to_lidar * tf_odom_to_lidar_odom_.inverse();
+  // Point-LIO publishes the MID360 IMU/body pose in the odom frame.
+  // Convert odom -> sensor_frame into odom -> base_frame using the static
+  // base_frame -> sensor_frame mounting transform.
+  tf2::Transform tf_odom_to_sensor;
+  tf2::fromMsg(msg->pose.pose, tf_odom_to_sensor);
+  tf2::Transform tf_odom_to_base = tf_odom_to_sensor * tf_odom_to_lidar_odom_.inverse();
 
   nav_msgs::msg::Odometry out;
   out.header.stamp = msg->header.stamp;
