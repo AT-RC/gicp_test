@@ -108,7 +108,7 @@ def generate_launch_description():
             'odom_frame': 'odom',
             'base_frame': 'base_link',
             'lidar_frame': 'mid360_imu',
-            'odom_topic': '/odometry',
+            'odom_topic': '/lidar_odometry',
             'enable_global_search': enable_global_search,
             'enable_court_crop': enable_court_crop
         }.items()

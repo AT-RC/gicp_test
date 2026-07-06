@@ -77,7 +77,7 @@ def generate_launch_description():
         "robot_base_frame", default_value="base_link", description="Robot base frame"
     )
     declare_odom_topic = DeclareLaunchArgument(
-        "odom_topic", default_value="/aft_mapped_to_init", description="Odometry topic for divergence detection"
+        "odom_topic", default_value="/lidar_odometry", description="Odometry topic for divergence detection"
     )
     declare_map_filter_x_min = DeclareLaunchArgument("map_filter_x_min", default_value="-1.0")
     declare_map_filter_x_max = DeclareLaunchArgument("map_filter_x_max", default_value="7.0")

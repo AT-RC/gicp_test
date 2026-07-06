@@ -40,7 +40,7 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->declare_parameter("base_frame", "");
   this->declare_parameter("robot_base_frame", "");
   this->declare_parameter("lidar_frame", "");
-  this->declare_parameter("odom_topic", "/aft_mapped_to_init");
+  this->declare_parameter("odom_topic", "/lidar_odometry");
   this->declare_parameter("prior_pcd_file", "");
   this->declare_parameter("init_pose", std::vector<double>{0., 0., 0., 0., 0., 0.});
 
@@ -334,9 +334,9 @@ void SmallGicpRelocalizationNode::performRegistration()
     if (confidence > 40.0) {
       lost_tracking_count_ = 0;
       Eigen::Isometry3d new_pose = result.T_target_source;
-      double translation_diff = (new_pose.translation() - previous_result_t_.translation()).norm();
+      double translation_diff = (new_pose.translation() - initial_guess.translation()).norm();
       
-      Eigen::AngleAxisd angle_axis(new_pose.linear().transpose() * previous_result_t_.linear());
+      Eigen::AngleAxisd angle_axis(new_pose.linear().transpose() * initial_guess.linear());
       double angle_diff = std::abs(angle_axis.angle());
 
       // 死区拦截 (Deadband Interception)
@@ -363,7 +363,15 @@ void SmallGicpRelocalizationNode::performRegistration()
         global_search_done_ = false;
         lost_tracking_count_ = 0;
         
-        // 3. Clear the garbage points
+        // 3. Freeze the robot's pose in the map to the last known good pose
+        {
+          std::lock_guard<std::mutex> lock(pose_mutex_);
+          Eigen::Isometry3d last_good_map_to_base_link = result_t_ * last_good_odom_to_base_link_;
+          result_t_ = last_good_map_to_base_link;
+          previous_result_t_ = result_t_;
+        }
+        
+        // 4. Clear the garbage points
         std::lock_guard<std::mutex> cloud_lock(cloud_mutex_);
         accumulated_cloud_->clear();
       }
@@ -379,6 +387,13 @@ void SmallGicpRelocalizationNode::performRegistration()
 
       global_search_done_ = false;
       lost_tracking_count_ = 0;
+      
+      {
+        std::lock_guard<std::mutex> lock(pose_mutex_);
+        Eigen::Isometry3d last_good_map_to_base_link = result_t_ * last_good_odom_to_base_link_;
+        result_t_ = last_good_map_to_base_link;
+        previous_result_t_ = result_t_;
+      }
       
       std::lock_guard<std::mutex> cloud_lock(cloud_mutex_);
       accumulated_cloud_->clear();
@@ -491,6 +506,7 @@ void SmallGicpRelocalizationNode::odometryCallback(const nav_msgs::msg::Odometry
     // Because Point-LIO is reset, its new odom -> base_link will start from Identity.
     // To keep map -> base_link continuous, we set map -> odom to the last known map -> base_link.
     result_t_ = last_good_map_to_base_link;
+    previous_result_t_ = result_t_; // CRITICAL: Ensure previous_result_t_ is also updated for local search center
     
     // 3. Clear accumulated garbage points
     std::lock_guard<std::mutex> cloud_lock(cloud_mutex_);
@@ -586,11 +602,16 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
   double search_y_min = map_filter_y_min_;
   double search_y_max = map_filter_y_max_;
   int search_threads = omp_get_max_threads(); // Full CPU for global search
+  Eigen::Isometry3d search_center;
+  {
+    std::lock_guard<std::mutex> lock(pose_mutex_);
+    search_center = previous_result_t_;
+  }
 
   if (!enable_global_search_) {
     // 1-meter local search around last known pose (previous_result_t_)
-    double origin_x = previous_result_t_.translation().x();
-    double origin_y = previous_result_t_.translation().y();
+    double origin_x = search_center.translation().x();
+    double origin_y = search_center.translation().y();
     search_x_min = origin_x - 2.0;
     search_x_max = origin_x + 2.0;
     search_y_min = origin_y - 2.0;
@@ -618,7 +639,7 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
       for (int iyaw = 0; iyaw < yaw_samples; ++iyaw) {
         double yaw = iyaw * yaw_step;
         Eigen::Isometry3d guess = Eigen::Isometry3d::Identity();
-        guess.translation() << x, y, previous_result_t_.translation().z();
+        guess.translation() << x, y, search_center.translation().z();
         guess.linear() = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
         coarse_candidates.push_back(guess);
       }
