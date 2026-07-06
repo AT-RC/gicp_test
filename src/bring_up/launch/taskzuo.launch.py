@@ -45,7 +45,7 @@ def generate_launch_description():
 
     declare_prior_pcd_file_cmd = DeclareLaunchArgument(
         "prior_pcd_file",
-        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "scans_you.pcd"]),
+        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "taskzuo.pcd"]),
         description="Full path to prior PCD file to load",
     )
 
@@ -83,11 +83,16 @@ def generate_launch_description():
         name='point_lio_node',
         output='screen',
         parameters=[point_lio_cfg_dir, {
+            'common.map_frame': 'odom',
+            'common.odom_frame': 'odom',
+            'common.base_frame': 'mid360_imu',
+            'common.lidar_frame': 'lidar',
             'publish.tf_send_en': False,
             'pcd_save.pcd_save_en': save_map
         }],
         remappings=[
             ('/aft_mapped_to_init', '/odometry'),
+            ('/point_lio/reset_state', '/point_lio/reset_state_disabled'),
             ('/tf', 'tf'),
             ('/tf_static', 'tf_static')
         ]
@@ -104,7 +109,7 @@ def generate_launch_description():
             'map_frame': 'map',
             'odom_frame': 'odom',
             'base_frame': 'base_link',
-            'lidar_frame': 'lidar',
+            'lidar_frame': 'mid360_imu',
             'odom_topic': '/odometry',
             'enable_global_search': enable_global_search,
             'map_filter_x_min': '-10.0',
@@ -127,7 +132,7 @@ def generate_launch_description():
             'registered_scan_topic': '/cloud_registered',
             'odom_frame': 'odom',
             'base_frame': 'base_link',
-            'lidar_frame': 'lidar'
+            'lidar_frame': 'mid360_imu'
         }.items()
     )
 
@@ -146,12 +151,12 @@ def generate_launch_description():
         output='screen'
     )
 
-    # 7. 静态 TF 发布 (base_link -> lidar)
+    # 7. 静态 TF 发布 (base_link -> MID360 IMU/body)
     static_tf_node = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
-        name='base_link_to_lidar',
-        arguments=['-0.16', '0', '0', '0', '0', '1.0', '0', 'base_link', 'lidar']
+        name='base_link_to_mid360_imu',
+        arguments=['-0.16', '0', '0', '0', '0', '1.0', '0', 'base_link', 'mid360_imu']
     )
 
     # 8. 启动 RViz

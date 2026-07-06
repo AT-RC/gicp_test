@@ -32,19 +32,19 @@ def generate_launch_description():
 
     declare_save_map = DeclareLaunchArgument(
         'save_map',
-        default_value='true',
+        default_value='false',
         description='Whether to enable mapping mode and save PCD map'
     )
 
     declare_localization = DeclareLaunchArgument(
         'localization',
-        default_value='false',
+        default_value='true',
         description='Whether to enable GICP relocalization'
     )
 
     declare_prior_pcd_file_cmd = DeclareLaunchArgument(
         "prior_pcd_file",
-        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "scans_zuo.pcd"]),
+        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "you.pcd"]),
         description="Full path to prior PCD file to load",
     )
 
@@ -62,7 +62,7 @@ def generate_launch_description():
 
     declare_enable_court_crop = DeclareLaunchArgument(
         'enable_court_crop',
-        default_value='false',
+        default_value='true',
         description='Whether to crop live scan points before continuous GICP'
     )
 
@@ -149,9 +149,23 @@ def generate_launch_description():
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_link_to_mid360_imu',
-        arguments=['-0.16', '0', '0', '0', '0', '1.0', '0', 'base_link', 'mid360_imu']
+        arguments=['-0.15', '0', '0.138', '0', '0', '1.0', '0', 'base_link', 'mid360_imu']
     )
 
+    # # 7.5 启动虚拟串口发送节点 (发送位姿到单片机)
+    # serial_node = Node(
+    #     package='virtual_serial_port',
+    #     executable='virtual_serial_port_node',
+    #     name='virtual_serial_port',
+    #     output='screen',
+    #     parameters=[{
+    #         'usb_vid': 0x0483,
+    #         'usb_pid': 0x5740,
+    #         'send_interval_ms': 10,
+    #         'odom_frame': 'odom',  # 根据 SLAM 输出调整，通常为 camera_init 或 odom
+    #         'base_frame': 'base_link'    # 通常为 aft_mapped 或 base_link
+    #     }]
+    # )
 
     # 8. 启动 RViz
     rviz_config_file = PathJoinSubstitution([bring_up_dir, 'rviz', 'airy.rviz'])
@@ -176,7 +190,8 @@ def generate_launch_description():
         point_lio_node,
         gicp_launch,
         # odom_monitor_node,
-        # map_monitor_node,
+        map_monitor_node,
         static_tf_node,
+        # serial_node,
         rviz_node
     ])

@@ -6,6 +6,7 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, Pyth
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
+
 def generate_launch_description():
     # 1. 获取各个包的路径
     livox_driver_dir = get_package_share_directory('livox_ros_driver2')
@@ -32,19 +33,19 @@ def generate_launch_description():
 
     declare_save_map = DeclareLaunchArgument(
         'save_map',
-        default_value='true',
+        default_value='false',
         description='Whether to enable mapping mode and save PCD map'
     )
 
     declare_localization = DeclareLaunchArgument(
         'localization',
-        default_value='false',
+        default_value='true',
         description='Whether to enable GICP relocalization'
     )
 
     declare_prior_pcd_file_cmd = DeclareLaunchArgument(
         "prior_pcd_file",
-        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "scans_zuo.pcd"]),
+        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "youh.pcd"]),
         description="Full path to prior PCD file to load",
     )
 
@@ -69,7 +70,7 @@ def generate_launch_description():
     # 2. 包含 Livox Mid360 雷达驱动 Launch
     livox_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            PathJoinSubstitution([livox_driver_dir, 'launch', 'msg_MID360_launch.py'])
+            PathJoinSubstitution([livox_driver_dir, 'launch', 'msg_MID3602_launch.py'])
         )
     )
 
@@ -91,6 +92,7 @@ def generate_launch_description():
         }],
         remappings=[
             ('/aft_mapped_to_init', '/odometry'),
+            ('/point_lio/reset_state', '/point_lio/reset_state_disabled'),
             ('/tf', 'tf'),
             ('/tf_static', 'tf_static')
         ]
@@ -110,6 +112,11 @@ def generate_launch_description():
             'lidar_frame': 'mid360_imu',
             'odom_topic': '/odometry',
             'enable_global_search': enable_global_search,
+            'map_filter_x_min': '-10.0',
+            'map_filter_x_max': '10.0',
+            'map_filter_y_min': '-6.0',
+            'map_filter_y_max': '6.0',
+            'max_z_deviation': '1.5',
             'enable_court_crop': enable_court_crop
         }.items()
     )
@@ -149,9 +156,8 @@ def generate_launch_description():
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_link_to_mid360_imu',
-        arguments=['-0.16', '0', '0', '0', '0', '1.0', '0', 'base_link', 'mid360_imu']
+        arguments=['0.1', '0', '0', '0', '0', '1.0', '0', 'base_link', 'mid360_imu']
     )
-
 
     # 8. 启动 RViz
     rviz_config_file = PathJoinSubstitution([bring_up_dir, 'rviz', 'airy.rviz'])
@@ -176,7 +182,7 @@ def generate_launch_description():
         point_lio_node,
         gicp_launch,
         # odom_monitor_node,
-        # map_monitor_node,
+        map_monitor_node,
         static_tf_node,
         rviz_node
     ])

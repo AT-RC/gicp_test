@@ -6,6 +6,7 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, Pyth
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
+
 def generate_launch_description():
     # 1. 获取各个包的路径
     livox_driver_dir = get_package_share_directory('livox_ros_driver2')
@@ -44,7 +45,7 @@ def generate_launch_description():
 
     declare_prior_pcd_file_cmd = DeclareLaunchArgument(
         "prior_pcd_file",
-        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "zuo.pcd"]),
+        default_value=PathJoinSubstitution([point_lio_dir, "PCD", "zuoh.pcd"]),
         description="Full path to prior PCD file to load",
     )
 
@@ -62,14 +63,14 @@ def generate_launch_description():
 
     declare_enable_court_crop = DeclareLaunchArgument(
         'enable_court_crop',
-        default_value='true',
+        default_value='false',
         description='Whether to crop live scan points before continuous GICP'
     )
 
     # 2. 包含 Livox Mid360 雷达驱动 Launch
     livox_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            PathJoinSubstitution([livox_driver_dir, 'launch', 'msg_MID360_launch.py'])
+            PathJoinSubstitution([livox_driver_dir, 'launch', 'msg_MID3602_launch.py'])
         )
     )
 
@@ -82,11 +83,16 @@ def generate_launch_description():
         name='point_lio_node',
         output='screen',
         parameters=[point_lio_cfg_dir, {
+            'common.map_frame': 'odom',
+            'common.odom_frame': 'odom',
+            'common.base_frame': 'mid360_imu',
+            'common.lidar_frame': 'lidar',
             'publish.tf_send_en': False,
             'pcd_save.pcd_save_en': save_map
         }],
         remappings=[
             ('/aft_mapped_to_init', '/odometry'),
+            ('/point_lio/reset_state', '/point_lio/reset_state_disabled'),
             ('/tf', 'tf'),
             ('/tf_static', 'tf_static')
         ]
@@ -103,9 +109,14 @@ def generate_launch_description():
             'map_frame': 'map',
             'odom_frame': 'odom',
             'base_frame': 'base_link',
-            'lidar_frame': 'lidar',
+            'lidar_frame': 'mid360_imu',
             'odom_topic': '/odometry',
             'enable_global_search': enable_global_search,
+            'map_filter_x_min': '-10.0',
+            'map_filter_x_max': '10.0',
+            'map_filter_y_min': '-6.0',
+            'map_filter_y_max': '6.0',
+            'max_z_deviation': '1.5',
             'enable_court_crop': enable_court_crop
         }.items()
     )
@@ -121,7 +132,7 @@ def generate_launch_description():
             'registered_scan_topic': '/cloud_registered',
             'odom_frame': 'odom',
             'base_frame': 'base_link',
-            'lidar_frame': 'lidar'
+            'lidar_frame': 'mid360_imu'
         }.items()
     )
 
@@ -140,28 +151,13 @@ def generate_launch_description():
         output='screen'
     )
 
-    # 7. 静态 TF 发布 (base_link -> lidar)
+    # 7. 静态 TF 发布 (base_link -> MID360 IMU/body)
     static_tf_node = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
-        name='base_link_to_lidar',
-        arguments=['-0.15', '0', '0.138', '0', '0', '1.0', '0', 'base_link', 'lidar']
+        name='base_link_to_mid360_imu',
+        arguments=['0.1', '0', '0', '0', '0', '1.0', '0', 'base_link', 'mid360_imu']
     )
-
-    # # 7.5 启动虚拟串口发送节点 (发送位姿到单片机)
-    # serial_node = Node(
-    #     package='virtual_serial_port',
-    #     executable='virtual_serial_port_node',
-    #     name='virtual_serial_port',
-    #     output='screen',
-    #     parameters=[{
-    #         'usb_vid': 0x0483,
-    #         'usb_pid': 0x5740,
-    #         'send_interval_ms': 10,
-    #         'odom_frame': 'odom',  # 根据 SLAM 输出调整，通常为 camera_init 或 odom
-    #         'base_frame': 'base_link'    # 通常为 aft_mapped 或 base_link
-    #     }]
-    # )
 
     # 8. 启动 RViz
     rviz_config_file = PathJoinSubstitution([bring_up_dir, 'rviz', 'airy.rviz'])
@@ -188,6 +184,5 @@ def generate_launch_description():
         # odom_monitor_node,
         map_monitor_node,
         static_tf_node,
-        # serial_node,
         rviz_node
     ])
