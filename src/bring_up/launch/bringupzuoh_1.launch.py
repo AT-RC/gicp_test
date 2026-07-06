@@ -83,10 +83,6 @@ def generate_launch_description():
         name='point_lio_node',
         output='screen',
         parameters=[point_lio_cfg_dir, {
-            'common.map_frame': 'odom',
-            'common.odom_frame': 'odom',
-            'common.base_frame': 'base_link',
-            'common.lidar_frame': 'lidar',
             'publish.tf_send_en': False,
             'pcd_save.pcd_save_en': save_map
         }],
