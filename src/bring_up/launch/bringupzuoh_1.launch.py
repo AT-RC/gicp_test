@@ -83,6 +83,10 @@ def generate_launch_description():
         name='point_lio_node',
         output='screen',
         parameters=[point_lio_cfg_dir, {
+            'common.map_frame': 'odom',
+            'common.odom_frame': 'odom',
+            'common.base_frame': 'base_link',
+            'common.lidar_frame': 'lidar',
             'publish.tf_send_en': False,
             'pcd_save.pcd_save_en': save_map
         }],
@@ -152,7 +156,7 @@ def generate_launch_description():
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_link_to_lidar',
-        arguments=['0.16', '0', '0', '0', '0', '1.0', '0', 'base_link', 'lidar']
+        arguments=['0.1', '0', '0', '0', '0', '1.0', '0', 'base_link', 'lidar']
     )
 
     # 8. 启动 RViz
