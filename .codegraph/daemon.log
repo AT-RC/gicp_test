@@ -110,3 +110,12 @@
 [CodeGraph MCP] Auto-synced 5 file(s) in 123ms
 [CodeGraph MCP] Auto-synced 1 file(s) in 138ms
 [CodeGraph MCP] Auto-synced 1 file(s) in 108ms
+[CodeGraph MCP] Auto-synced 4 file(s) in 92ms
+[CodeGraph MCP] Auto-synced 4 file(s) in 126ms
+[CodeGraph MCP] Auto-synced 4 file(s) in 101ms
+[CodeGraph MCP] Auto-synced 4 file(s) in 79ms
+[CodeGraph daemon] Shutting down (SIGTERM; clients=0).
+[CodeGraph daemon] Listening on /home/xjh/Desktop/at_rc/.codegraph/daemon.sock (pid 7306, v1.0.1). Idle timeout 300000ms.
+[CodeGraph MCP] File watcher active — graph will auto-sync on changes
+[CodeGraph MCP] Auto-synced 4 file(s) in 180ms
+[CodeGraph MCP] Auto-synced 4 file(s) in 105ms
