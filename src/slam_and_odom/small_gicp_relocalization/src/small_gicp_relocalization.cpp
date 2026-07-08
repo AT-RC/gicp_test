@@ -68,6 +68,7 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->declare_parameter("relocalization_map_filter_x_max", 5.0);
   this->declare_parameter("relocalization_map_filter_y_min", -5.0);
   this->declare_parameter("relocalization_map_filter_y_max", 5.0);
+  this->declare_parameter("relocalization_global_search_coarse_step", -1.0);
 
   this->declare_parameter("continuous_update_rate", 0.5);
   this->declare_parameter("update_min_translation", 0.03);
@@ -130,6 +131,7 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->get_parameter("relocalization_map_filter_x_max", relocalization_map_filter_x_max_);
   this->get_parameter("relocalization_map_filter_y_min", relocalization_map_filter_y_min_);
   this->get_parameter("relocalization_map_filter_y_max", relocalization_map_filter_y_max_);
+  this->get_parameter("relocalization_global_search_coarse_step", relocalization_global_search_coarse_step_);
 
   this->get_parameter("continuous_update_rate", continuous_update_rate_);
   this->get_parameter("update_min_translation", update_min_translation_);
@@ -772,6 +774,9 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
   }
 
   double step = enable_global_search_ ? global_search_coarse_step_ : global_search_step_;
+  if (use_relocalization_range && relocalization_global_search_coarse_step_ > 0.0) {
+    step = relocalization_global_search_coarse_step_;
+  }
   int samples_x = std::max(1, static_cast<int>(std::round((search_x_max - search_x_min) / step)) + 1);
   int samples_y = std::max(1, static_cast<int>(std::round((search_y_max - search_y_min) / step)) + 1);
   

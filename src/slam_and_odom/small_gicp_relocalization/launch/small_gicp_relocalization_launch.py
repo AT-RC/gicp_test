@@ -44,6 +44,7 @@ def generate_launch_description():
     prior_pcd_file = LaunchConfiguration("prior_pcd_file")
     enable_global_search = LaunchConfiguration("enable_global_search")
     continuous_update_rate = LaunchConfiguration("continuous_update_rate")
+    global_search_coarse_step = LaunchConfiguration("global_search_coarse_step")
     startup_yaw_prior_enabled = LaunchConfiguration("startup_yaw_prior_enabled")
     startup_yaw_prior_deg = LaunchConfiguration("startup_yaw_prior_deg")
     startup_yaw_prior_tolerance_deg = LaunchConfiguration("startup_yaw_prior_tolerance_deg")
@@ -90,6 +91,10 @@ def generate_launch_description():
     declare_relocalization_map_filter_x_max = DeclareLaunchArgument("relocalization_map_filter_x_max", default_value="7.0")
     declare_relocalization_map_filter_y_min = DeclareLaunchArgument("relocalization_map_filter_y_min", default_value="-5.0")
     declare_relocalization_map_filter_y_max = DeclareLaunchArgument("relocalization_map_filter_y_max", default_value="1.0")
+    declare_relocalization_global_search_coarse_step = DeclareLaunchArgument(
+        "relocalization_global_search_coarse_step", default_value="-1.0",
+        description="Coarse search step used after tracking loss; negative means reuse global_search_coarse_step"
+    )
     declare_prior_pcd_file = DeclareLaunchArgument(
         "prior_pcd_file", 
         default_value=PathJoinSubstitution([point_lio_dir, "PCD", "scans.pcd"]), 
@@ -97,6 +102,9 @@ def generate_launch_description():
     )
     declare_enable_global_search = DeclareLaunchArgument(
         "enable_global_search", default_value="true", description="Enable full map global search"
+    )
+    declare_global_search_coarse_step = DeclareLaunchArgument(
+        "global_search_coarse_step", default_value="4.0", description="Coarse global search grid step"
     )
     declare_continuous_update_rate = DeclareLaunchArgument(
         "continuous_update_rate", default_value="1.0", description="Continuous update rate for GICP"
@@ -158,8 +166,10 @@ def generate_launch_description():
                 "relocalization_map_filter_x_max": LaunchConfiguration("relocalization_map_filter_x_max"),
                 "relocalization_map_filter_y_min": LaunchConfiguration("relocalization_map_filter_y_min"),
                 "relocalization_map_filter_y_max": LaunchConfiguration("relocalization_map_filter_y_max"),
+                "relocalization_global_search_coarse_step": LaunchConfiguration("relocalization_global_search_coarse_step"),
                 "prior_pcd_file": prior_pcd_file,
                 "enable_global_search": enable_global_search,
+                "global_search_coarse_step": global_search_coarse_step,
                 "continuous_update_rate": continuous_update_rate,
                 "startup_yaw_prior_enabled": startup_yaw_prior_enabled,
                 "startup_yaw_prior_deg": startup_yaw_prior_deg,
@@ -198,8 +208,10 @@ def generate_launch_description():
         declare_relocalization_map_filter_x_max,
         declare_relocalization_map_filter_y_min,
         declare_relocalization_map_filter_y_max,
+        declare_relocalization_global_search_coarse_step,
         declare_prior_pcd_file,
         declare_enable_global_search,
+        declare_global_search_coarse_step,
         declare_continuous_update_rate,
         declare_startup_yaw_prior_enabled,
         declare_startup_yaw_prior_deg,

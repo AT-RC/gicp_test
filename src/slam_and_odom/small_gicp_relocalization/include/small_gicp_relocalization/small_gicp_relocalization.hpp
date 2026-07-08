@@ -105,6 +105,7 @@ private:
   double relocalization_map_filter_x_max_;
   double relocalization_map_filter_y_min_;
   double relocalization_map_filter_y_max_;
+  double relocalization_global_search_coarse_step_;
 
   double continuous_update_rate_;
   double update_min_translation_;
