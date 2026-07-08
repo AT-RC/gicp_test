@@ -21,6 +21,10 @@
 #include "tf2_eigen/tf2_eigen.hpp"
 #include <Eigen/Eigenvalues>
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
+
 namespace small_gicp_relocalization
 {
 
@@ -69,6 +73,14 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->declare_parameter("max_z_deviation", 0.5);
 
   this->declare_parameter("enable_global_search", false);
+  this->declare_parameter("startup_consistency_enabled", true);
+  this->declare_parameter("startup_consistency_trans_thresh", 0.4);
+  this->declare_parameter("startup_consistency_yaw_thresh_deg", 15.0);
+  this->declare_parameter("startup_consistency_score_ratio", 1.2);
+  this->declare_parameter("startup_candidate_max_count", 8);
+  this->declare_parameter("startup_yaw_prior_enabled", false);
+  this->declare_parameter("startup_yaw_prior_deg", 180.0);
+  this->declare_parameter("startup_yaw_prior_tolerance_deg", 60.0);
 
   // 赛场实时裁剪参数（原始地图系，与 transform_map.py 的裁剪框一致）
   this->declare_parameter("enable_court_crop", true);
@@ -119,6 +131,24 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->get_parameter("max_z_deviation", max_z_deviation_);
 
   this->get_parameter("enable_global_search", enable_global_search_);
+  this->get_parameter("startup_consistency_enabled", startup_consistency_enabled_);
+  this->get_parameter("startup_consistency_trans_thresh", startup_consistency_trans_thresh_);
+
+  double startup_consistency_yaw_thresh_deg = 15.0;
+  this->get_parameter("startup_consistency_yaw_thresh_deg", startup_consistency_yaw_thresh_deg);
+  startup_consistency_yaw_thresh_ = startup_consistency_yaw_thresh_deg * M_PI / 180.0;
+
+  this->get_parameter("startup_consistency_score_ratio", startup_consistency_score_ratio_);
+  this->get_parameter("startup_candidate_max_count", startup_candidate_max_count_);
+  this->get_parameter("startup_yaw_prior_enabled", startup_yaw_prior_enabled_);
+
+  double startup_yaw_prior_deg = 180.0;
+  this->get_parameter("startup_yaw_prior_deg", startup_yaw_prior_deg);
+  startup_yaw_prior_ = normalizeAngle(startup_yaw_prior_deg * M_PI / 180.0);
+
+  double startup_yaw_prior_tolerance_deg = 60.0;
+  this->get_parameter("startup_yaw_prior_tolerance_deg", startup_yaw_prior_tolerance_deg);
+  startup_yaw_prior_tolerance_ = std::max(0.0, startup_yaw_prior_tolerance_deg * M_PI / 180.0);
 
   this->get_parameter("enable_court_crop", enable_court_crop_);
   this->get_parameter("court_crop_x_min", court_crop_x_min_);
@@ -361,6 +391,7 @@ void SmallGicpRelocalizationNode::performRegistration()
 
         // 2. Break the TF to trigger safe stop
         global_search_done_ = false;
+        clearStartupCandidates();
         lost_tracking_count_ = 0;
         
         // 3. Freeze the robot's pose in the map to the last known good pose
@@ -386,6 +417,7 @@ void SmallGicpRelocalizationNode::performRegistration()
       reset_publisher_->publish(reset_msg);
 
       global_search_done_ = false;
+      clearStartupCandidates();
       lost_tracking_count_ = 0;
       
       {
@@ -461,6 +493,7 @@ void SmallGicpRelocalizationNode::initialPoseCallback(
     std::lock_guard<std::mutex> lock(pose_mutex_);
     previous_result_t_ = result_t_ = map_to_odom;
     global_search_done_ = true;
+    clearStartupCandidates();
   } catch (tf2::TransformException & ex) {
     RCLCPP_WARN(
       this->get_logger(), "Could not transform initial pose from %s to %s: %s",
@@ -494,6 +527,7 @@ void SmallGicpRelocalizationNode::odometryCallback(const nav_msgs::msg::Odometry
 
   if (is_diverged) {
     global_search_done_ = false;
+    clearStartupCandidates();
     lost_tracking_count_ = 0;
     
     // 1. Immediately reset Point-LIO so it stops publishing garbage
@@ -566,6 +600,110 @@ void SmallGicpRelocalizationNode::cropCourtCloud(
   cloud.swap(kept);
 }
 
+void SmallGicpRelocalizationNode::clearStartupCandidates()
+{
+  std::lock_guard<std::mutex> lock(startup_candidate_mutex_);
+  startup_candidates_.clear();
+  startup_candidate_sequence_ = 0;
+}
+
+double SmallGicpRelocalizationNode::normalizeAngle(double angle) const
+{
+  while (angle > M_PI) {
+    angle -= 2.0 * M_PI;
+  }
+  while (angle < -M_PI) {
+    angle += 2.0 * M_PI;
+  }
+  return angle;
+}
+
+double SmallGicpRelocalizationNode::getYawFromPose(const Eigen::Isometry3d & pose) const
+{
+  const Eigen::Matrix3d rotation = pose.linear();
+  return std::atan2(rotation(1, 0), rotation(0, 0));
+}
+
+std::vector<double> SmallGicpRelocalizationNode::buildStartupYawCandidates(int yaw_samples) const
+{
+  const int safe_yaw_samples = std::max(1, yaw_samples);
+  const double yaw_step = 2.0 * M_PI / safe_yaw_samples;
+  std::vector<double> yaw_candidates;
+  yaw_candidates.reserve(safe_yaw_samples);
+
+  for (int iyaw = 0; iyaw < safe_yaw_samples; ++iyaw) {
+    const double yaw = normalizeAngle(iyaw * yaw_step);
+    if (!startup_yaw_prior_enabled_) {
+      yaw_candidates.push_back(yaw);
+      continue;
+    }
+
+    const double yaw_diff = std::abs(normalizeAngle(yaw - startup_yaw_prior_));
+    if (yaw_diff <= startup_yaw_prior_tolerance_) {
+      yaw_candidates.push_back(yaw);
+    }
+  }
+
+  if (yaw_candidates.empty()) {
+    yaw_candidates.push_back(startup_yaw_prior_);
+  }
+
+  return yaw_candidates;
+}
+
+bool SmallGicpRelocalizationNode::isStartupCandidateConsistent(
+  const StartupCandidate & history, const Eigen::Isometry3d & candidate_pose,
+  double candidate_score) const
+{
+  const Eigen::Vector3d delta = history.pose.translation() - candidate_pose.translation();
+  const double xy_diff = std::hypot(delta.x(), delta.y());
+  const double yaw_diff = std::abs(
+    normalizeAngle(getYawFromPose(history.pose) - getYawFromPose(candidate_pose)));
+  const double worse_score = std::max(history.score, candidate_score);
+  const double better_score = std::max(1e-6, std::min(history.score, candidate_score));
+  const double score_ratio = worse_score / better_score;
+
+  return xy_diff <= startup_consistency_trans_thresh_ &&
+         yaw_diff <= startup_consistency_yaw_thresh_ &&
+         score_ratio <= startup_consistency_score_ratio_;
+}
+
+bool SmallGicpRelocalizationNode::acceptStartupCandidate(
+  const Eigen::Isometry3d & candidate_pose, double candidate_score,
+  Eigen::Isometry3d & accepted_pose, double & accepted_score, int & matched_sequence)
+{
+  if (!startup_consistency_enabled_) {
+    accepted_pose = candidate_pose;
+    accepted_score = candidate_score;
+    matched_sequence = 1;
+    return true;
+  }
+
+  std::lock_guard<std::mutex> lock(startup_candidate_mutex_);
+  for (const auto & history : startup_candidates_) {
+    if (isStartupCandidateConsistent(history, candidate_pose, candidate_score)) {
+      if (candidate_score <= history.score) {
+        accepted_pose = candidate_pose;
+        accepted_score = candidate_score;
+      } else {
+        accepted_pose = history.pose;
+        accepted_score = history.score;
+      }
+      matched_sequence = history.sequence;
+      startup_candidates_.clear();
+      startup_candidate_sequence_ = 0;
+      return true;
+    }
+  }
+
+  startup_candidates_.push_back({candidate_pose, candidate_score, ++startup_candidate_sequence_});
+  if (startup_candidate_max_count_ > 0 &&
+      static_cast<int>(startup_candidates_.size()) > startup_candidate_max_count_) {
+    startup_candidates_.erase(startup_candidates_.begin());
+  }
+  return false;
+}
+
 void SmallGicpRelocalizationNode::performGlobalSearch()
 {
   if (!global_map_initialized_) {
@@ -628,16 +766,17 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
   double y_step = (samples_y > 1) ? ((search_y_max - search_y_min) / (samples_y - 1)) : 0.0;
   
   int yaw_samples = enable_global_search_ ? global_search_coarse_yaw_samples_ : global_search_yaw_samples_;
-  double yaw_step = 2.0 * M_PI / std::max(1, yaw_samples);
+  const auto yaw_candidates = buildStartupYawCandidates(yaw_samples);
 
-  RCLCPP_INFO(this->get_logger(), "Global search grid: %dx%d samples (step: %.2fm), %d yaw samples", samples_x, samples_y, step, yaw_samples);
+  RCLCPP_INFO(
+    this->get_logger(), "Global search grid: %dx%d samples (step: %.2fm), %zu/%d yaw samples",
+    samples_x, samples_y, step, yaw_candidates.size(), yaw_samples);
 
   for (int ix = 0; ix < samples_x; ++ix) {
     double x = search_x_min + ix * x_step;
     for (int iy = 0; iy < samples_y; ++iy) {
       double y = search_y_min + iy * y_step;
-      for (int iyaw = 0; iyaw < yaw_samples; ++iyaw) {
-        double yaw = iyaw * yaw_step;
+      for (const double yaw : yaw_candidates) {
         Eigen::Isometry3d guess = Eigen::Isometry3d::Identity();
         guess.translation() << x, y, search_center.translation().z();
         guess.linear() = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
@@ -734,19 +873,36 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
 
   if (found_valid) {
-    std::lock_guard<std::mutex> lock(pose_mutex_);
-    
-    // Since Point-LIO was already reset at the moment of divergence, 
-    // the accumulated_cloud_ we just matched is relative to the NEW odom frame.
-    // Therefore, best_pose is EXACTLY the new map -> odom_new! No complex math needed.
-    previous_result_t_ = result_t_ = best_pose;
-    global_search_done_ = true;
-    
-    RCLCPP_INFO(this->get_logger(), "==========================================================");
-    RCLCPP_INFO(this->get_logger(), "★ ★ ★ GLOBAL INITIALIZATION SUCCESSFUL ★ ★ ★");
-    RCLCPP_INFO(this->get_logger(), "Best score: %f. Time taken: %ld ms", best_score, duration);
-    RCLCPP_INFO(this->get_logger(), "Robot snapped to true global pose. Resuming continuous tracking.");
-    RCLCPP_INFO(this->get_logger(), "==========================================================");
+    Eigen::Isometry3d accepted_pose = Eigen::Isometry3d::Identity();
+    double accepted_score = std::numeric_limits<double>::max();
+    int matched_sequence = 0;
+    const bool accepted = acceptStartupCandidate(
+      best_pose, best_score, accepted_pose, accepted_score, matched_sequence);
+
+    if (accepted) {
+      std::lock_guard<std::mutex> lock(pose_mutex_);
+      
+      // Since Point-LIO was already reset at the moment of divergence, 
+      // the accumulated_cloud_ we just matched is relative to the NEW odom frame.
+      // Therefore, accepted_pose is EXACTLY the new map -> odom_new! No complex math needed.
+      previous_result_t_ = result_t_ = accepted_pose;
+      global_search_done_ = true;
+      lost_tracking_count_ = 0;
+      
+      RCLCPP_INFO(this->get_logger(), "==========================================================");
+      RCLCPP_INFO(this->get_logger(), "★ ★ ★ GLOBAL INITIALIZATION SUCCESSFUL ★ ★ ★");
+      RCLCPP_INFO(
+        this->get_logger(),
+        "Accepted startup candidate matched with candidate #%d. Best score: %f. Accepted score: %f. Time taken: %ld ms",
+        matched_sequence, best_score, accepted_score, duration);
+      RCLCPP_INFO(this->get_logger(), "Robot snapped to true global pose. Resuming continuous tracking.");
+      RCLCPP_INFO(this->get_logger(), "==========================================================");
+    } else {
+      RCLCPP_WARN(
+        this->get_logger(),
+        "Startup candidate cached but not published yet. Waiting for another consistent global search result. Score: %f. Time taken: %ld ms",
+        best_score, duration);
+    }
   } else {
     RCLCPP_WARN(this->get_logger(), "Fine search failed to find a valid pose! Retrying next frame...");
   }

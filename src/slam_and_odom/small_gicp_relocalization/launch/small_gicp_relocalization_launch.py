@@ -44,6 +44,9 @@ def generate_launch_description():
     prior_pcd_file = LaunchConfiguration("prior_pcd_file")
     enable_global_search = LaunchConfiguration("enable_global_search")
     continuous_update_rate = LaunchConfiguration("continuous_update_rate")
+    startup_yaw_prior_enabled = LaunchConfiguration("startup_yaw_prior_enabled")
+    startup_yaw_prior_deg = LaunchConfiguration("startup_yaw_prior_deg")
+    startup_yaw_prior_tolerance_deg = LaunchConfiguration("startup_yaw_prior_tolerance_deg")
     max_z_deviation = LaunchConfiguration("max_z_deviation")
 
     declare_num_threads = DeclareLaunchArgument(
@@ -94,6 +97,15 @@ def generate_launch_description():
     declare_continuous_update_rate = DeclareLaunchArgument(
         "continuous_update_rate", default_value="1.0", description="Continuous update rate for GICP"
     )
+    declare_startup_yaw_prior_enabled = DeclareLaunchArgument(
+        "startup_yaw_prior_enabled", default_value="false", description="Enable startup yaw prior for global search"
+    )
+    declare_startup_yaw_prior_deg = DeclareLaunchArgument(
+        "startup_yaw_prior_deg", default_value="180.0", description="Startup base_link yaw in map frame, degrees"
+    )
+    declare_startup_yaw_prior_tolerance_deg = DeclareLaunchArgument(
+        "startup_yaw_prior_tolerance_deg", default_value="60.0", description="Allowed startup yaw deviation, degrees"
+    )
     declare_update_min_translation = DeclareLaunchArgument(
         "update_min_translation", default_value="0.05", description="Minimum translation to update GICP pose (meters)"
     )
@@ -141,6 +153,9 @@ def generate_launch_description():
                 "prior_pcd_file": prior_pcd_file,
                 "enable_global_search": enable_global_search,
                 "continuous_update_rate": continuous_update_rate,
+                "startup_yaw_prior_enabled": startup_yaw_prior_enabled,
+                "startup_yaw_prior_deg": startup_yaw_prior_deg,
+                "startup_yaw_prior_tolerance_deg": startup_yaw_prior_tolerance_deg,
                 "update_min_translation": LaunchConfiguration("update_min_translation"),
                 "update_min_rotation": LaunchConfiguration("update_min_rotation"),
                 "max_z_deviation": max_z_deviation,
@@ -174,6 +189,9 @@ def generate_launch_description():
         declare_prior_pcd_file,
         declare_enable_global_search,
         declare_continuous_update_rate,
+        declare_startup_yaw_prior_enabled,
+        declare_startup_yaw_prior_deg,
+        declare_startup_yaw_prior_tolerance_deg,
         declare_update_min_translation,
         declare_update_min_rotation,
         declare_max_z_deviation,

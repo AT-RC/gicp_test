@@ -49,6 +49,22 @@ private:
   void initializeGlobalMap();
   void performRegistration();
   void performGlobalSearch();
+  struct StartupCandidate
+  {
+    Eigen::Isometry3d pose;
+    double score;
+    int sequence;
+  };
+  bool acceptStartupCandidate(
+    const Eigen::Isometry3d & candidate_pose, double candidate_score,
+    Eigen::Isometry3d & accepted_pose, double & accepted_score, int & matched_sequence);
+  bool isStartupCandidateConsistent(
+    const StartupCandidate & history, const Eigen::Isometry3d & candidate_pose,
+    double candidate_score) const;
+  std::vector<double> buildStartupYawCandidates(int yaw_samples) const;
+  double getYawFromPose(const Eigen::Isometry3d & pose) const;
+  double normalizeAngle(double angle) const;
+  void clearStartupCandidates();
   // 把实时帧点云投回原始地图系，裁掉赛场外的人群点（赛场内全留，场外只留天花板）
   void cropCourtCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr & cloud);
   void publishTransform();
@@ -93,6 +109,16 @@ private:
   double max_z_deviation_;
 
   bool enable_global_search_;
+  bool startup_consistency_enabled_;
+  double startup_consistency_trans_thresh_;
+  double startup_consistency_yaw_thresh_;
+  double startup_consistency_score_ratio_;
+  int startup_candidate_max_count_;
+  bool startup_yaw_prior_enabled_;
+  double startup_yaw_prior_;
+  double startup_yaw_prior_tolerance_;
+  int startup_candidate_sequence_{0};
+  std::vector<StartupCandidate> startup_candidates_;
 
   // 赛场实时裁剪：在原始地图系下，赛场框内全保留，框外只留 Z>court_crop_z_min_ 的天花板点
   bool enable_court_crop_;
@@ -132,6 +158,7 @@ private:
 
   std::mutex cloud_mutex_;
   std::mutex pose_mutex_;
+  std::mutex startup_candidate_mutex_;
   std::atomic<bool> global_map_initialized_{false};
   std::atomic<bool> is_registering_{false};
   std::atomic<bool> global_search_done_{false};
