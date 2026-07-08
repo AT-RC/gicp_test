@@ -64,6 +64,10 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->declare_parameter("map_filter_y_max", 5.0);
   this->declare_parameter("map_filter_z_min", -1.0);
   this->declare_parameter("map_filter_z_max", 8.0);
+  this->declare_parameter("relocalization_map_filter_x_min", -5.0);
+  this->declare_parameter("relocalization_map_filter_x_max", 5.0);
+  this->declare_parameter("relocalization_map_filter_y_min", -5.0);
+  this->declare_parameter("relocalization_map_filter_y_max", 5.0);
 
   this->declare_parameter("continuous_update_rate", 0.5);
   this->declare_parameter("update_min_translation", 0.03);
@@ -122,6 +126,10 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->get_parameter("map_filter_y_max", map_filter_y_max_);
   this->get_parameter("map_filter_z_min", map_filter_z_min_);
   this->get_parameter("map_filter_z_max", map_filter_z_max_);
+  this->get_parameter("relocalization_map_filter_x_min", relocalization_map_filter_x_min_);
+  this->get_parameter("relocalization_map_filter_x_max", relocalization_map_filter_x_max_);
+  this->get_parameter("relocalization_map_filter_y_min", relocalization_map_filter_y_min_);
+  this->get_parameter("relocalization_map_filter_y_max", relocalization_map_filter_y_max_);
 
   this->get_parameter("continuous_update_rate", continuous_update_rate_);
   this->get_parameter("update_min_translation", update_min_translation_);
@@ -391,6 +399,7 @@ void SmallGicpRelocalizationNode::performRegistration()
 
         // 2. Break the TF to trigger safe stop
         global_search_done_ = false;
+        use_relocalization_search_range_ = true;
         clearStartupCandidates();
         lost_tracking_count_ = 0;
         
@@ -417,6 +426,7 @@ void SmallGicpRelocalizationNode::performRegistration()
       reset_publisher_->publish(reset_msg);
 
       global_search_done_ = false;
+      use_relocalization_search_range_ = true;
       clearStartupCandidates();
       lost_tracking_count_ = 0;
       
@@ -493,6 +503,7 @@ void SmallGicpRelocalizationNode::initialPoseCallback(
     std::lock_guard<std::mutex> lock(pose_mutex_);
     previous_result_t_ = result_t_ = map_to_odom;
     global_search_done_ = true;
+    use_relocalization_search_range_ = false;
     clearStartupCandidates();
   } catch (tf2::TransformException & ex) {
     RCLCPP_WARN(
@@ -527,6 +538,7 @@ void SmallGicpRelocalizationNode::odometryCallback(const nav_msgs::msg::Odometry
 
   if (is_diverged) {
     global_search_done_ = false;
+    use_relocalization_search_range_ = true;
     clearStartupCandidates();
     lost_tracking_count_ = 0;
     
@@ -735,10 +747,11 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
 
   std::vector<Eigen::Isometry3d> coarse_candidates;
   
-  double search_x_min = map_filter_x_min_;
-  double search_x_max = map_filter_x_max_;
-  double search_y_min = map_filter_y_min_;
-  double search_y_max = map_filter_y_max_;
+  const bool use_relocalization_range = use_relocalization_search_range_.load();
+  double search_x_min = use_relocalization_range ? relocalization_map_filter_x_min_ : map_filter_x_min_;
+  double search_x_max = use_relocalization_range ? relocalization_map_filter_x_max_ : map_filter_x_max_;
+  double search_y_min = use_relocalization_range ? relocalization_map_filter_y_min_ : map_filter_y_min_;
+  double search_y_max = use_relocalization_range ? relocalization_map_filter_y_max_ : map_filter_y_max_;
   int search_threads = omp_get_max_threads(); // Full CPU for global search
   Eigen::Isometry3d search_center;
   {
@@ -769,8 +782,11 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
   const auto yaw_candidates = buildStartupYawCandidates(yaw_samples);
 
   RCLCPP_INFO(
-    this->get_logger(), "Global search grid: %dx%d samples (step: %.2fm), %zu/%d yaw samples",
-    samples_x, samples_y, step, yaw_candidates.size(), yaw_samples);
+    this->get_logger(),
+    "%s search grid: %dx%d samples (step: %.2fm), %zu/%d yaw samples, x[%.2f, %.2f], y[%.2f, %.2f]",
+    use_relocalization_range ? "Relocalization" : "Startup",
+    samples_x, samples_y, step, yaw_candidates.size(), yaw_samples,
+    search_x_min, search_x_max, search_y_min, search_y_max);
 
   for (int ix = 0; ix < samples_x; ++ix) {
     double x = search_x_min + ix * x_step;
@@ -887,6 +903,7 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
       // Therefore, accepted_pose is EXACTLY the new map -> odom_new! No complex math needed.
       previous_result_t_ = result_t_ = accepted_pose;
       global_search_done_ = true;
+      use_relocalization_search_range_ = false;
       lost_tracking_count_ = 0;
       
       RCLCPP_INFO(this->get_logger(), "==========================================================");

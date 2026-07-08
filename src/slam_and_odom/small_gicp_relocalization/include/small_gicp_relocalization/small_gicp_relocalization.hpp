@@ -101,6 +101,11 @@ private:
   double map_filter_z_min_;
   double map_filter_z_max_;
 
+  double relocalization_map_filter_x_min_;
+  double relocalization_map_filter_x_max_;
+  double relocalization_map_filter_y_min_;
+  double relocalization_map_filter_y_max_;
+
   double continuous_update_rate_;
   double update_min_translation_;
   double update_min_rotation_;
@@ -162,6 +167,7 @@ private:
   std::atomic<bool> global_map_initialized_{false};
   std::atomic<bool> is_registering_{false};
   std::atomic<bool> global_search_done_{false};
+  std::atomic<bool> use_relocalization_search_range_{false};
   std::thread registration_thread_;
   std::atomic<bool> run_thread_{true};
   int lost_tracking_count_{0};

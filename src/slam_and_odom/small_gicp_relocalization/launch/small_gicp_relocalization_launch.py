@@ -86,6 +86,10 @@ def generate_launch_description():
     declare_map_filter_x_max = DeclareLaunchArgument("map_filter_x_max", default_value="7.0")
     declare_map_filter_y_min = DeclareLaunchArgument("map_filter_y_min", default_value="-5.0")
     declare_map_filter_y_max = DeclareLaunchArgument("map_filter_y_max", default_value="1.0")
+    declare_relocalization_map_filter_x_min = DeclareLaunchArgument("relocalization_map_filter_x_min", default_value="-1.0")
+    declare_relocalization_map_filter_x_max = DeclareLaunchArgument("relocalization_map_filter_x_max", default_value="7.0")
+    declare_relocalization_map_filter_y_min = DeclareLaunchArgument("relocalization_map_filter_y_min", default_value="-5.0")
+    declare_relocalization_map_filter_y_max = DeclareLaunchArgument("relocalization_map_filter_y_max", default_value="1.0")
     declare_prior_pcd_file = DeclareLaunchArgument(
         "prior_pcd_file", 
         default_value=PathJoinSubstitution([point_lio_dir, "PCD", "scans.pcd"]), 
@@ -150,6 +154,10 @@ def generate_launch_description():
                 "map_filter_x_max": LaunchConfiguration("map_filter_x_max"),
                 "map_filter_y_min": LaunchConfiguration("map_filter_y_min"),
                 "map_filter_y_max": LaunchConfiguration("map_filter_y_max"),
+                "relocalization_map_filter_x_min": LaunchConfiguration("relocalization_map_filter_x_min"),
+                "relocalization_map_filter_x_max": LaunchConfiguration("relocalization_map_filter_x_max"),
+                "relocalization_map_filter_y_min": LaunchConfiguration("relocalization_map_filter_y_min"),
+                "relocalization_map_filter_y_max": LaunchConfiguration("relocalization_map_filter_y_max"),
                 "prior_pcd_file": prior_pcd_file,
                 "enable_global_search": enable_global_search,
                 "continuous_update_rate": continuous_update_rate,
@@ -186,6 +194,10 @@ def generate_launch_description():
         declare_map_filter_x_max,
         declare_map_filter_y_min,
         declare_map_filter_y_max,
+        declare_relocalization_map_filter_x_min,
+        declare_relocalization_map_filter_x_max,
+        declare_relocalization_map_filter_y_min,
+        declare_relocalization_map_filter_y_max,
         declare_prior_pcd_file,
         declare_enable_global_search,
         declare_continuous_update_rate,
