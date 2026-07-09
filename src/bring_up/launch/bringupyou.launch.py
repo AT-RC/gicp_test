@@ -62,7 +62,7 @@ def generate_launch_description():
 
     declare_enable_court_crop = DeclareLaunchArgument(
         'enable_court_crop',
-        default_value='true',
+        default_value='false',
         description='Whether to crop live scan points before continuous GICP'
     )
 
@@ -110,11 +110,11 @@ def generate_launch_description():
             'lidar_frame': 'mid360_imu',
             'odom_topic': '/lidar_odometry',
             'enable_global_search': enable_global_search,
-            'map_filter_x_min': '-5.0',
-            'map_filter_x_max': '5.0',
-            'map_filter_y_min': '-10.0',
-            'map_filter_y_max': '10.0',
-            'global_search_coarse_step': '4.0',
+            'map_filter_x_min': '-1.0',
+            'map_filter_x_max': '1.0',
+            'map_filter_y_min': '-1.0',
+            'map_filter_y_max': '1.0',
+            'global_search_coarse_step': '1.0',
             'global_search_coarse_yaw_samples': '6',
             'global_search_coarse_iters': '2',
             'global_search_fine_iters': '15',

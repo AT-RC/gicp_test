@@ -5,12 +5,31 @@ import math
 import argparse
 import os
 
+BOX_SIZE_M = 0.25
+BOX_HALF_M = BOX_SIZE_M / 2.0
+BOX_CLUSTER_MAX_EXTENT_M = 0.75
+BOX_CLUSTER_MIN_POINTS = 100
+
 def build_grid_points(nx, ny, spacing_m):
     grid_points = []
     for i in range(nx):
         for j in range(ny):
             grid_points.append([i * spacing_m, j * spacing_m, 0.0])
     return np.array(grid_points)
+
+def distance_to_box_perimeters(points_xy, layout_x, layout_y, spacing_m, half_l):
+    best_dist = np.full(points_xy.shape[0], np.inf)
+    for i in range(layout_x):
+        for j in range(layout_y):
+            center = np.array([i * spacing_m, j * spacing_m])
+            d = np.abs(points_xy - center)
+            outside = np.maximum(d - half_l, 0.0)
+            outside_dist = np.linalg.norm(outside, axis=1)
+            inside = (d[:, 0] <= half_l) & (d[:, 1] <= half_l)
+            inside_dist = np.minimum(half_l - d[:, 0], half_l - d[:, 1])
+            dist = np.where(inside, inside_dist, outside_dist)
+            best_dist = np.minimum(best_dist, dist)
+    return best_dist
 
 def extract_box_features(pcd, points, crop_x, crop_y, crop_z, eps):
     x = points[:, 0]
@@ -38,8 +57,13 @@ def extract_box_features(pcd, points, crop_x, crop_y, crop_z, eps):
         aabb = cluster_pcd.get_axis_aligned_bounding_box()
         extent = aabb.get_extent()
 
-        # 25cm 箱子在单帧/建图点云中会有缺面，但不应在 X/Y 上超过 45cm。
-        if extent[0] < 0.45 and extent[1] < 0.45 and max(extent[0], extent[1]) > 0.08:
+        # 真实箱子边长是 25cm，但建图点云会因为边缘/连接点膨胀；
+        # 这里的 75cm 只是聚类包络上限，用来保留箱子簇，不代表箱子物理尺寸。
+        if (
+            len(cluster_indices) >= BOX_CLUSTER_MIN_POINTS and
+            extent[0] < BOX_CLUSTER_MAX_EXTENT_M and extent[1] < BOX_CLUSTER_MAX_EXTENT_M and
+            max(extent[0], extent[1]) > 0.08
+        ):
             box_centroids.append(aabb.get_center())
             box_point_indices.append(cluster_indices.tolist())
 
@@ -142,12 +166,16 @@ def main():
     CROP_Y = (0.5, 3.0)    # 阵列 Y 范围
     CROP_Z_CANDIDATES = [
         (-0.15, 0.30),  # 兼容旧地图：箱子点偏低
+        (-0.05, 0.40),
         (0.00, 0.30),
-        (0.03, 0.25),
-        (0.05, 0.25),   # 过滤低处连接带
-        (0.10, 0.30),   # 兼容 fin11：箱子底部/地面点会把簇粘在一起
+        (0.03, 0.35),
+        (0.05, 0.35),   # 过滤低处连接带
+        (0.10, 0.40),   # 兼容 fin11：箱子底部/地面点会把簇粘在一起
+        (0.20, 0.30),   # 高处切片：更容易把 25cm 箱子从底部连接点中分开
+        (0.20, 0.35),
+        (0.22, 0.35),
     ]
-    DBSCAN_EPS_CANDIDATES = [0.06, 0.08, 0.10, 0.12, 0.15]
+    DBSCAN_EPS_CANDIDATES = [0.035, 0.04, 0.06, 0.08, 0.10, 0.12, 0.15]
     # ===================================================================
 
     # --- 2. 聚类并严格过滤掉“墙壁”等干扰物 ---
@@ -170,14 +198,14 @@ def main():
                 "cluster_count": cluster_count,
                 "match": match,
             })
-            print(f"  Z={crop_z}, eps={eps:.2f}: 裁剪 {crop_count} 点, 聚类 {cluster_count} 个, "
+            print(f"  Z={crop_z}, eps={eps:.3f}: 裁剪 {crop_count} 点, 聚类 {cluster_count} 个, "
                   f"箱子候选 {len(centroids)} 个, 可匹配 {match['match_count']} 个, "
                   f"模板 {match['layout'][0]}x{match['layout'][1]}")
 
     candidates.sort(key=lambda item: (
         item["match"]["match_count"],
-        len(item["centroids"]),
-        -item["match"]["error"]
+        -item["match"]["error"],
+        -abs(len(item["centroids"]) - 8)
     ), reverse=True)
     selected = candidates[0]
     non_ground_pcd = selected["non_ground"]
@@ -234,7 +262,7 @@ def main():
         for j in range(layout_y):
             cx_box = i * 0.85
             cy_box = j * 0.85
-            half_l = 0.125 # 25cm 边长的一半
+            half_l = BOX_HALF_M
             # 沿着边框每隔 1cm 撒一个点
             for offset in np.arange(-half_l, half_l, 0.01):
                 template_points.append([cx_box + offset, cy_box - half_l, 0]) # 上边
@@ -261,12 +289,20 @@ def main():
     near = np.where((ap[:,0] >= -0.6) & (ap[:,0] <= (layout_x - 1) * spacing_m + 0.6) &
                     (ap[:,1] >= -0.6) & (ap[:,1] <= (layout_y - 1) * spacing_m + 0.6))[0]
     raw_pcd2d = raw_pcd2d.select_by_index(near)
+
+    # 箱子真实边长是 25cm。粗对齐后只保留靠近理想箱子边框的点做 ICP，
+    # 避免膨胀簇里的连接带/杂点把 25cm 轮廓吸偏。
+    ap = np.asarray(raw_pcd2d.points)
+    edge_dist = distance_to_box_perimeters(ap[:, :2], layout_x, layout_y, spacing_m, BOX_HALF_M)
+    edge_indices = np.where(edge_dist <= 0.18)[0]
+    if len(edge_indices) >= 50:
+        raw_pcd2d = raw_pcd2d.select_by_index(edge_indices)
     
     # 启动极致精度的 ICP (Iterative Closest Point)
     # 因为现在误差只在 10cm 左右，所以 max_correspondence_distance 设为 0.20
     print("正在执行高精度 ICP 轮廓吸附...")
     icp_result = o3d.pipelines.registration.registration_icp(
-        raw_pcd2d, template_pcd, max_correspondence_distance=0.20,
+        raw_pcd2d, template_pcd, max_correspondence_distance=0.15,
         init=np.eye(4),
         estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(),
         criteria=o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=100)

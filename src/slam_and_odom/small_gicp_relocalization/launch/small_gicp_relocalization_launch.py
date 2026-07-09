@@ -43,6 +43,14 @@ def generate_launch_description():
     odom_topic = LaunchConfiguration("odom_topic")
     prior_pcd_file = LaunchConfiguration("prior_pcd_file")
     enable_global_search = LaunchConfiguration("enable_global_search")
+    global_search_step = LaunchConfiguration("global_search_step")
+    global_search_yaw_samples = LaunchConfiguration("global_search_yaw_samples")
+    global_search_candidate_iters = LaunchConfiguration("global_search_candidate_iters")
+    global_search_coarse_step = LaunchConfiguration("global_search_coarse_step")
+    global_search_coarse_yaw_samples = LaunchConfiguration("global_search_coarse_yaw_samples")
+    global_search_coarse_leaf_size = LaunchConfiguration("global_search_coarse_leaf_size")
+    global_search_coarse_iters = LaunchConfiguration("global_search_coarse_iters")
+    global_search_fine_iters = LaunchConfiguration("global_search_fine_iters")
     continuous_update_rate = LaunchConfiguration("continuous_update_rate")
     max_z_deviation = LaunchConfiguration("max_z_deviation")
 
@@ -90,6 +98,30 @@ def generate_launch_description():
     )
     declare_enable_global_search = DeclareLaunchArgument(
         "enable_global_search", default_value="true", description="Enable full map global search"
+    )
+    declare_global_search_step = DeclareLaunchArgument(
+        "global_search_step", default_value="2.0", description="Local initialization grid step"
+    )
+    declare_global_search_yaw_samples = DeclareLaunchArgument(
+        "global_search_yaw_samples", default_value="6", description="Local initialization yaw samples"
+    )
+    declare_global_search_candidate_iters = DeclareLaunchArgument(
+        "global_search_candidate_iters", default_value="5", description="Local initialization candidate iterations"
+    )
+    declare_global_search_coarse_step = DeclareLaunchArgument(
+        "global_search_coarse_step", default_value="4.0", description="Global coarse search grid step"
+    )
+    declare_global_search_coarse_yaw_samples = DeclareLaunchArgument(
+        "global_search_coarse_yaw_samples", default_value="4", description="Global coarse search yaw samples"
+    )
+    declare_global_search_coarse_leaf_size = DeclareLaunchArgument(
+        "global_search_coarse_leaf_size", default_value="1.0", description="Global coarse search voxel leaf size"
+    )
+    declare_global_search_coarse_iters = DeclareLaunchArgument(
+        "global_search_coarse_iters", default_value="2", description="Global coarse search optimizer iterations"
+    )
+    declare_global_search_fine_iters = DeclareLaunchArgument(
+        "global_search_fine_iters", default_value="15", description="Global fine search optimizer iterations"
     )
     declare_continuous_update_rate = DeclareLaunchArgument(
         "continuous_update_rate", default_value="1.0", description="Continuous update rate for GICP"
@@ -140,6 +172,14 @@ def generate_launch_description():
                 "map_filter_y_max": LaunchConfiguration("map_filter_y_max"),
                 "prior_pcd_file": prior_pcd_file,
                 "enable_global_search": enable_global_search,
+                "global_search_step": global_search_step,
+                "global_search_yaw_samples": global_search_yaw_samples,
+                "global_search_candidate_iters": global_search_candidate_iters,
+                "global_search_coarse_step": global_search_coarse_step,
+                "global_search_coarse_yaw_samples": global_search_coarse_yaw_samples,
+                "global_search_coarse_leaf_size": global_search_coarse_leaf_size,
+                "global_search_coarse_iters": global_search_coarse_iters,
+                "global_search_fine_iters": global_search_fine_iters,
                 "continuous_update_rate": continuous_update_rate,
                 "update_min_translation": LaunchConfiguration("update_min_translation"),
                 "update_min_rotation": LaunchConfiguration("update_min_rotation"),
@@ -173,6 +213,14 @@ def generate_launch_description():
         declare_map_filter_y_max,
         declare_prior_pcd_file,
         declare_enable_global_search,
+        declare_global_search_step,
+        declare_global_search_yaw_samples,
+        declare_global_search_candidate_iters,
+        declare_global_search_coarse_step,
+        declare_global_search_coarse_yaw_samples,
+        declare_global_search_coarse_leaf_size,
+        declare_global_search_coarse_iters,
+        declare_global_search_fine_iters,
         declare_continuous_update_rate,
         declare_update_min_translation,
         declare_update_min_rotation,
