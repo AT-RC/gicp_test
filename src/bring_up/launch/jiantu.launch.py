@@ -69,7 +69,7 @@ def generate_launch_description():
     # 2. 包含 Livox Mid360 雷达驱动 Launch
     livox_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            PathJoinSubstitution([livox_driver_dir, 'launch', 'msg_MID360_launch.py'])
+            PathJoinSubstitution([livox_driver_dir, 'launch', 'msg_MID3603_launch.py'])
         )
     )
 
