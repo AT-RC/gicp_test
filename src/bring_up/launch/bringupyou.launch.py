@@ -110,10 +110,10 @@ def generate_launch_description():
             'lidar_frame': 'mid360_imu',
             'odom_topic': '/lidar_odometry',
             'enable_global_search': enable_global_search,
-            'map_filter_x_min': '-1.0',
-            'map_filter_x_max': '1.0',
-            'map_filter_y_min': '-1.0',
-            'map_filter_y_max': '1.0',
+            'map_filter_x_min': '-3.0',
+            'map_filter_x_max': '3.0',
+            'map_filter_y_min': '-3.0',
+            'map_filter_y_max': '3.0',
             'relocalization_map_filter_x_min': '-10.0',
             'relocalization_map_filter_x_max': '10.0',
             'relocalization_map_filter_y_min': '-5.0',
@@ -163,6 +163,19 @@ def generate_launch_description():
         output='screen'
     )
 
+    lidar_global_position_node = Node(
+        package='bring_up',
+        executable='lidar_global_position_publisher',
+        name='lidar_global_position_publisher',
+        output='screen',
+        parameters=[{
+            'global_frame': 'map',
+            'lidar_frame': 'mid360_imu',
+            'topic_name': 'lidar_global_position',
+            'publish_rate_hz': 20.0
+        }]
+    )
+
     # 7. 静态 TF 发布 (base_link -> MID360 IMU/body)
     static_tf_node = Node(
         package='tf2_ros',
@@ -210,6 +223,7 @@ def generate_launch_description():
         gicp_launch,
         # odom_monitor_node,
         map_monitor_node,
+        # lidar_global_position_node,
         static_tf_node,
         # serial_node,
         rviz_node
