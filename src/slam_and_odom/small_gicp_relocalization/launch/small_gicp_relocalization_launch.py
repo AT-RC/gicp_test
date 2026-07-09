@@ -40,7 +40,15 @@ def generate_launch_description():
     base_frame = LaunchConfiguration("base_frame")
     lidar_frame = LaunchConfiguration("lidar_frame")
     robot_base_frame = LaunchConfiguration("robot_base_frame")
+    odom_topic = LaunchConfiguration("odom_topic")
     prior_pcd_file = LaunchConfiguration("prior_pcd_file")
+    enable_global_search = LaunchConfiguration("enable_global_search")
+    continuous_update_rate = LaunchConfiguration("continuous_update_rate")
+    global_search_coarse_step = LaunchConfiguration("global_search_coarse_step")
+    startup_yaw_prior_enabled = LaunchConfiguration("startup_yaw_prior_enabled")
+    startup_yaw_prior_deg = LaunchConfiguration("startup_yaw_prior_deg")
+    startup_yaw_prior_tolerance_deg = LaunchConfiguration("startup_yaw_prior_tolerance_deg")
+    max_z_deviation = LaunchConfiguration("max_z_deviation")
 
     declare_num_threads = DeclareLaunchArgument(
         "num_threads", default_value="4", description="Number of threads"
@@ -72,11 +80,64 @@ def generate_launch_description():
     declare_robot_base_frame = DeclareLaunchArgument(
         "robot_base_frame", default_value="base_link", description="Robot base frame"
     )
+    declare_odom_topic = DeclareLaunchArgument(
+        "odom_topic", default_value="/lidar_odometry", description="Odometry topic for divergence detection"
+    )
+    declare_map_filter_x_min = DeclareLaunchArgument("map_filter_x_min", default_value="-1.0")
+    declare_map_filter_x_max = DeclareLaunchArgument("map_filter_x_max", default_value="7.0")
+    declare_map_filter_y_min = DeclareLaunchArgument("map_filter_y_min", default_value="-5.0")
+    declare_map_filter_y_max = DeclareLaunchArgument("map_filter_y_max", default_value="1.0")
+    declare_relocalization_map_filter_x_min = DeclareLaunchArgument("relocalization_map_filter_x_min", default_value="-1.0")
+    declare_relocalization_map_filter_x_max = DeclareLaunchArgument("relocalization_map_filter_x_max", default_value="7.0")
+    declare_relocalization_map_filter_y_min = DeclareLaunchArgument("relocalization_map_filter_y_min", default_value="-5.0")
+    declare_relocalization_map_filter_y_max = DeclareLaunchArgument("relocalization_map_filter_y_max", default_value="1.0")
+    declare_relocalization_global_search_coarse_step = DeclareLaunchArgument(
+        "relocalization_global_search_coarse_step", default_value="-1.0",
+        description="Coarse search step used after tracking loss; negative means reuse global_search_coarse_step"
+    )
     declare_prior_pcd_file = DeclareLaunchArgument(
         "prior_pcd_file", 
         default_value=PathJoinSubstitution([point_lio_dir, "PCD", "scans.pcd"]), 
         description="Prior PCD file"
     )
+    declare_enable_global_search = DeclareLaunchArgument(
+        "enable_global_search", default_value="true", description="Enable full map global search"
+    )
+    declare_global_search_coarse_step = DeclareLaunchArgument(
+        "global_search_coarse_step", default_value="4.0", description="Coarse global search grid step"
+    )
+    declare_continuous_update_rate = DeclareLaunchArgument(
+        "continuous_update_rate", default_value="1.0", description="Continuous update rate for GICP"
+    )
+    declare_startup_yaw_prior_enabled = DeclareLaunchArgument(
+        "startup_yaw_prior_enabled", default_value="false", description="Enable startup yaw prior for global search"
+    )
+    declare_startup_yaw_prior_deg = DeclareLaunchArgument(
+        "startup_yaw_prior_deg", default_value="180.0", description="Startup base_link yaw in map frame, degrees"
+    )
+    declare_startup_yaw_prior_tolerance_deg = DeclareLaunchArgument(
+        "startup_yaw_prior_tolerance_deg", default_value="60.0", description="Allowed startup yaw deviation, degrees"
+    )
+    declare_update_min_translation = DeclareLaunchArgument(
+        "update_min_translation", default_value="0.05", description="Minimum translation to update GICP pose (meters)"
+    )
+    declare_update_min_rotation = DeclareLaunchArgument(
+        "update_min_rotation", default_value="0.05", description="Minimum rotation to update GICP pose (radians)"
+    )
+    declare_max_z_deviation = DeclareLaunchArgument(
+        "max_z_deviation", default_value="0.5", description="Maximum allowed odometry Z deviation before reset (meters)"
+    )
+
+    # 赛场实时裁剪参数（原始地图系，与 transform_map.py 的裁剪框保持一致）
+    declare_enable_court_crop = DeclareLaunchArgument(
+        "enable_court_crop", default_value="true", description="Enable runtime court cropping of live scan"
+    )
+    declare_court_crop_x_min = DeclareLaunchArgument("court_crop_x_min", default_value="0.0")
+    declare_court_crop_x_max = DeclareLaunchArgument("court_crop_x_max", default_value="6.0")
+    declare_court_crop_y_min = DeclareLaunchArgument("court_crop_y_min", default_value="-4.0")
+    declare_court_crop_y_max = DeclareLaunchArgument("court_crop_y_max", default_value="0.0")
+    declare_court_crop_margin = DeclareLaunchArgument("court_crop_margin", default_value="0.3")
+    declare_court_crop_z_min = DeclareLaunchArgument("court_crop_z_min", default_value="2.0")
 
     node = Node(
         package="small_gicp_relocalization",
@@ -96,7 +157,33 @@ def generate_launch_description():
                 "base_frame": base_frame,
                 "lidar_frame": lidar_frame,
                 "robot_base_frame": robot_base_frame,
+                "odom_topic": odom_topic,
+                "map_filter_x_min": LaunchConfiguration("map_filter_x_min"),
+                "map_filter_x_max": LaunchConfiguration("map_filter_x_max"),
+                "map_filter_y_min": LaunchConfiguration("map_filter_y_min"),
+                "map_filter_y_max": LaunchConfiguration("map_filter_y_max"),
+                "relocalization_map_filter_x_min": LaunchConfiguration("relocalization_map_filter_x_min"),
+                "relocalization_map_filter_x_max": LaunchConfiguration("relocalization_map_filter_x_max"),
+                "relocalization_map_filter_y_min": LaunchConfiguration("relocalization_map_filter_y_min"),
+                "relocalization_map_filter_y_max": LaunchConfiguration("relocalization_map_filter_y_max"),
+                "relocalization_global_search_coarse_step": LaunchConfiguration("relocalization_global_search_coarse_step"),
                 "prior_pcd_file": prior_pcd_file,
+                "enable_global_search": enable_global_search,
+                "global_search_coarse_step": global_search_coarse_step,
+                "continuous_update_rate": continuous_update_rate,
+                "startup_yaw_prior_enabled": startup_yaw_prior_enabled,
+                "startup_yaw_prior_deg": startup_yaw_prior_deg,
+                "startup_yaw_prior_tolerance_deg": startup_yaw_prior_tolerance_deg,
+                "update_min_translation": LaunchConfiguration("update_min_translation"),
+                "update_min_rotation": LaunchConfiguration("update_min_rotation"),
+                "max_z_deviation": max_z_deviation,
+                "enable_court_crop": LaunchConfiguration("enable_court_crop"),
+                "court_crop_x_min": LaunchConfiguration("court_crop_x_min"),
+                "court_crop_x_max": LaunchConfiguration("court_crop_x_max"),
+                "court_crop_y_min": LaunchConfiguration("court_crop_y_min"),
+                "court_crop_y_max": LaunchConfiguration("court_crop_y_max"),
+                "court_crop_margin": LaunchConfiguration("court_crop_margin"),
+                "court_crop_z_min": LaunchConfiguration("court_crop_z_min"),
             }
         ],
     )
@@ -112,6 +199,32 @@ def generate_launch_description():
         declare_base_frame,
         declare_lidar_frame,
         declare_robot_base_frame,
+        declare_odom_topic,
+        declare_map_filter_x_min,
+        declare_map_filter_x_max,
+        declare_map_filter_y_min,
+        declare_map_filter_y_max,
+        declare_relocalization_map_filter_x_min,
+        declare_relocalization_map_filter_x_max,
+        declare_relocalization_map_filter_y_min,
+        declare_relocalization_map_filter_y_max,
+        declare_relocalization_global_search_coarse_step,
         declare_prior_pcd_file,
+        declare_enable_global_search,
+        declare_global_search_coarse_step,
+        declare_continuous_update_rate,
+        declare_startup_yaw_prior_enabled,
+        declare_startup_yaw_prior_deg,
+        declare_startup_yaw_prior_tolerance_deg,
+        declare_update_min_translation,
+        declare_update_min_rotation,
+        declare_max_z_deviation,
+        declare_enable_court_crop,
+        declare_court_crop_x_min,
+        declare_court_crop_x_max,
+        declare_court_crop_y_min,
+        declare_court_crop_y_max,
+        declare_court_crop_margin,
+        declare_court_crop_z_min,
         node
     ])

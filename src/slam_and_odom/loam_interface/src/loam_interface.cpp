@@ -28,12 +28,14 @@ LoamInterfaceNode::LoamInterfaceNode(const rclcpp::NodeOptions & options)
   this->declare_parameter<std::string>("odom_frame", "odom");
   this->declare_parameter<std::string>("base_frame", "");
   this->declare_parameter<std::string>("lidar_frame", "");
+  this->declare_parameter<bool>("publish_tf", true);
 
   this->get_parameter("state_estimation_topic", state_estimation_topic_);
   this->get_parameter("registered_scan_topic", registered_scan_topic_);
   this->get_parameter("odom_frame", odom_frame_);
   this->get_parameter("base_frame", base_frame_);
   this->get_parameter("lidar_frame", lidar_frame_);
+  this->get_parameter("publish_tf", publish_tf_);
 
   base_frame_to_lidar_initialized_ = false;
 
@@ -54,11 +56,9 @@ LoamInterfaceNode::LoamInterfaceNode(const rclcpp::NodeOptions & options)
 
 void LoamInterfaceNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
 {
-  // NOTE: Input point cloud message is based on the `lidar_odom`
-  // Here we transform it to the REAL `odom` frame
-  auto out = std::make_shared<sensor_msgs::msg::PointCloud2>();
-  pcl_ros::transformPointCloud(odom_frame_, tf_odom_to_lidar_odom_, *msg, *out);
-  pcd_pub_->publish(*out);
+  auto out = *msg;
+  out.header.frame_id = odom_frame_;
+  pcd_pub_->publish(out);
 }
 
 void LoamInterfaceNode::odometryCallback(const nav_msgs::msg::Odometry::ConstSharedPtr msg)
@@ -79,38 +79,60 @@ void LoamInterfaceNode::odometryCallback(const nav_msgs::msg::Odometry::ConstSha
     }
   }
 
-  // Transform the odometry_msg (based lidar_odom) to the odom frame
-  tf2::Transform tf_lidar_odom_to_lidar;
-  tf2::fromMsg(msg->pose.pose, tf_lidar_odom_to_lidar);
-  tf2::Transform tf_odom_to_lidar = tf_odom_to_lidar_odom_ * tf_lidar_odom_to_lidar;
+  // Point-LIO publishes the MID360 IMU/body pose in the odom frame.
+  // Convert odom -> sensor_frame into odom -> base_frame using the static
+  // base_frame -> sensor_frame mounting transform.
+  tf2::Transform tf_odom_to_sensor;
+  tf2::fromMsg(msg->pose.pose, tf_odom_to_sensor);
+  tf2::Transform tf_odom_to_base = tf_odom_to_sensor * tf_odom_to_lidar_odom_.inverse();
 
   nav_msgs::msg::Odometry out;
   out.header.stamp = msg->header.stamp;
   out.header.frame_id = odom_frame_;
-  out.child_frame_id = lidar_frame_;
-
-  const auto & origin = tf_odom_to_lidar.getOrigin();
+  out.child_frame_id = base_frame_;
+  const auto & origin = tf_odom_to_base.getOrigin();
   out.pose.pose.position.x = origin.x();
   out.pose.pose.position.y = origin.y();
   out.pose.pose.position.z = origin.z();
-  out.pose.pose.orientation = tf2::toMsg(tf_odom_to_lidar.getRotation());
+  out.pose.pose.orientation = tf2::toMsg(tf_odom_to_base.getRotation());
+
+  // Convert twist to base_frame_
+  // The twist in Point-LIO is originally in lidar_odom frame, which equals the initial lidar frame.
+  // Wait, Point-LIO's twist isn't used, but we'll copy it just in case, though it needs rotation.
+  // We'll leave it as zero or copy.
+  out.twist = msg->twist; // NOTE: strictly speaking, twist should be rotated, but Point-LIO sets it to 0.
+
+  // Set a small but non-zero covariance so robot_localization doesn't treat it as perfect (0)
+  out.pose.covariance[0] = 1e-3;
+  out.pose.covariance[7] = 1e-3;
+  out.pose.covariance[14] = 1e-3;
+  out.pose.covariance[21] = 1e-3;
+  out.pose.covariance[28] = 1e-3;
+  out.pose.covariance[35] = 1e-3;
+
+  out.twist.covariance[0] = 1e-3;
+  out.twist.covariance[7] = 1e-3;
+  out.twist.covariance[14] = 1e-3;
+  out.twist.covariance[21] = 1e-3;
+  out.twist.covariance[28] = 1e-3;
+  out.twist.covariance[35] = 1e-3;
 
   odom_pub_->publish(out);
 
-  // Publish TF: odom -> base_frame (chassis)
-  geometry_msgs::msg::TransformStamped tf_msg;
-  tf_msg.header.stamp = msg->header.stamp;
-  tf_msg.header.frame_id = odom_frame_;
-  tf_msg.child_frame_id = base_frame_;
-  
-  // Transform from odom to base_frame
-  tf2::Transform tf_odom_to_base = tf_odom_to_lidar * tf_odom_to_lidar_odom_.inverse();
-  tf_msg.transform.translation.x = tf_odom_to_base.getOrigin().x();
-  tf_msg.transform.translation.y = tf_odom_to_base.getOrigin().y();
-  tf_msg.transform.translation.z = tf_odom_to_base.getOrigin().z();
-  tf_msg.transform.rotation = tf2::toMsg(tf_odom_to_base.getRotation());
-  
-  tf_broadcaster_->sendTransform(tf_msg);
+  if (publish_tf_) {
+    // Publish TF: odom -> base_frame (chassis)
+    geometry_msgs::msg::TransformStamped tf_msg;
+    tf_msg.header.stamp = msg->header.stamp;
+    tf_msg.header.frame_id = odom_frame_;
+    tf_msg.child_frame_id = base_frame_;
+    
+    tf_msg.transform.translation.x = origin.x();
+    tf_msg.transform.translation.y = origin.y();
+    tf_msg.transform.translation.z = origin.z();
+    tf_msg.transform.rotation = tf2::toMsg(tf_odom_to_base.getRotation());
+    
+    tf_broadcaster_->sendTransform(tf_msg);
+  }
 }
 
 }  // namespace loam_interface

@@ -53,7 +53,7 @@ def generate_launch_description():
 
     declare_filter_size_surf = DeclareLaunchArgument(
         "filter_size_surf",
-        default_value="0.5",
+        default_value="0.2",
         description="Voxel filter size for surface points",
     )
 

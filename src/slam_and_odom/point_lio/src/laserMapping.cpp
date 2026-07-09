@@ -10,6 +10,7 @@
 
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
+#include <std_msgs/msg/empty.hpp>
 
 #include "li_initialization.h"
 
@@ -275,6 +276,16 @@ void publish_odometry(
   }
   set_posestamp(odomAftMapped.pose.pose);
 
+  if (!use_imu_as_input) {
+    odomAftMapped.twist.twist.linear.x = kf_output.x_.vel(0);
+    odomAftMapped.twist.twist.linear.y = kf_output.x_.vel(1);
+    odomAftMapped.twist.twist.linear.z = kf_output.x_.vel(2);
+  } else {
+    odomAftMapped.twist.twist.linear.x = kf_input.x_.vel(0);
+    odomAftMapped.twist.twist.linear.y = kf_input.x_.vel(1);
+    odomAftMapped.twist.twist.linear.z = kf_input.x_.vel(2);
+  }
+
   pubOdomAftMapped->publish(odomAftMapped);
 
   if (tf_send_en) {
@@ -391,6 +402,13 @@ int main(int argc, char ** argv)
   auto pub_path = nh->create_publisher<nav_msgs::msg::Path>("path", 20);
   auto tf_broadcaster = std::make_shared<tf2_ros::TransformBroadcaster>(nh);
 
+  auto sub_reset_state = nh->create_subscription<std_msgs::msg::Empty>(
+    "/point_lio/reset_state", 10,
+    [&](const std_msgs::msg::Empty::SharedPtr /*msg*/) {
+      flg_reset = true;
+      RCLCPP_WARN(LOGGER, "Received reset signal from external node.");
+    });
+
   //------------------------------------------------------------------------------------------------------
   signal(SIGINT, SigHandle);
   rclcpp::Rate rate(500);
@@ -415,6 +433,10 @@ int main(int argc, char ** argv)
         is_first_frame = true;
         flg_reset = false;
         init_map = false;
+        first_lidar_time = 0;
+        first_imu_time = 0;
+        Measures.imu.clear();
+        imu_deque.clear();
 
         {
           ivox_.reset(new IVoxType(ivox_options_));

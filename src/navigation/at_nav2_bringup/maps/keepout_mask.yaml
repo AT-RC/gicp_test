@@ -1,0 +1,10 @@
+free_thresh: 0.196
+image: keepout_mask1.pgm
+mode: scale
+negate: 0
+occupied_thresh: 0.65
+origin:
+- -3.62183609008789
+- -0.12882366180419869
+- 0.0
+resolution: 0.05

@@ -19,6 +19,11 @@
 #include "small_gicp/pcl/pcl_registration.hpp"
 #include "small_gicp/util/downsampling_omp.hpp"
 #include "tf2_eigen/tf2_eigen.hpp"
+#include <Eigen/Eigenvalues>
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
 
 namespace small_gicp_relocalization
 {
@@ -39,6 +44,7 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->declare_parameter("base_frame", "");
   this->declare_parameter("robot_base_frame", "");
   this->declare_parameter("lidar_frame", "");
+  this->declare_parameter("odom_topic", "/lidar_odometry");
   this->declare_parameter("prior_pcd_file", "");
   this->declare_parameter("init_pose", std::vector<double>{0., 0., 0., 0., 0., 0.});
 
@@ -52,12 +58,43 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->declare_parameter("global_search_coarse_iters", 2);
   this->declare_parameter("global_search_fine_iters", 15);
 
-  this->declare_parameter("map_filter_x_min", 0.0);
-  this->declare_parameter("map_filter_x_max", 50.0);
-  this->declare_parameter("map_filter_y_min", -2.0);
-  this->declare_parameter("map_filter_y_max", 2.0);
-  this->declare_parameter("map_filter_z_min", 0.0);
-  this->declare_parameter("map_filter_z_max", 6.0);
+  this->declare_parameter("map_filter_x_min", -5.0);
+  this->declare_parameter("map_filter_x_max", 5.0);
+  this->declare_parameter("map_filter_y_min", -5.0);
+  this->declare_parameter("map_filter_y_max", 5.0);
+  this->declare_parameter("map_filter_z_min", -1.0);
+  this->declare_parameter("map_filter_z_max", 8.0);
+  this->declare_parameter("relocalization_map_filter_x_min", -5.0);
+  this->declare_parameter("relocalization_map_filter_x_max", 5.0);
+  this->declare_parameter("relocalization_map_filter_y_min", -5.0);
+  this->declare_parameter("relocalization_map_filter_y_max", 5.0);
+  this->declare_parameter("relocalization_global_search_coarse_step", -1.0);
+
+  this->declare_parameter("continuous_update_rate", 0.5);
+  this->declare_parameter("update_min_translation", 0.03);
+  this->declare_parameter("update_min_rotation", 0.02);
+
+  this->declare_parameter("max_divergence_speed", 5.0);
+  this->declare_parameter("max_z_deviation", 0.5);
+
+  this->declare_parameter("enable_global_search", false);
+  this->declare_parameter("startup_consistency_enabled", true);
+  this->declare_parameter("startup_consistency_trans_thresh", 0.4);
+  this->declare_parameter("startup_consistency_yaw_thresh_deg", 15.0);
+  this->declare_parameter("startup_consistency_score_ratio", 1.2);
+  this->declare_parameter("startup_candidate_max_count", 8);
+  this->declare_parameter("startup_yaw_prior_enabled", false);
+  this->declare_parameter("startup_yaw_prior_deg", 180.0);
+  this->declare_parameter("startup_yaw_prior_tolerance_deg", 60.0);
+
+  // 赛场实时裁剪参数（原始地图系，与 transform_map.py 的裁剪框一致）
+  this->declare_parameter("enable_court_crop", true);
+  this->declare_parameter("court_crop_x_min", 0.0);
+  this->declare_parameter("court_crop_x_max", 6.0);
+  this->declare_parameter("court_crop_y_min", -4.0);
+  this->declare_parameter("court_crop_y_max", 0.0);
+  this->declare_parameter("court_crop_margin", 0.3);
+  this->declare_parameter("court_crop_z_min", 2.0);
 
   this->get_parameter("num_threads", num_threads_);
   this->get_parameter("num_neighbors", num_neighbors_);
@@ -70,6 +107,7 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->get_parameter("base_frame", base_frame_);
   this->get_parameter("robot_base_frame", robot_base_frame_);
   this->get_parameter("lidar_frame", lidar_frame_);
+  this->get_parameter("odom_topic", odom_topic_);
   this->get_parameter("prior_pcd_file", prior_pcd_file_);
   this->get_parameter("init_pose", init_pose_);
 
@@ -89,6 +127,46 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->get_parameter("map_filter_y_max", map_filter_y_max_);
   this->get_parameter("map_filter_z_min", map_filter_z_min_);
   this->get_parameter("map_filter_z_max", map_filter_z_max_);
+  this->get_parameter("relocalization_map_filter_x_min", relocalization_map_filter_x_min_);
+  this->get_parameter("relocalization_map_filter_x_max", relocalization_map_filter_x_max_);
+  this->get_parameter("relocalization_map_filter_y_min", relocalization_map_filter_y_min_);
+  this->get_parameter("relocalization_map_filter_y_max", relocalization_map_filter_y_max_);
+  this->get_parameter("relocalization_global_search_coarse_step", relocalization_global_search_coarse_step_);
+
+  this->get_parameter("continuous_update_rate", continuous_update_rate_);
+  this->get_parameter("update_min_translation", update_min_translation_);
+  this->get_parameter("update_min_rotation", update_min_rotation_);
+
+  this->get_parameter("max_divergence_speed", max_divergence_speed_);
+  this->get_parameter("max_z_deviation", max_z_deviation_);
+
+  this->get_parameter("enable_global_search", enable_global_search_);
+  this->get_parameter("startup_consistency_enabled", startup_consistency_enabled_);
+  this->get_parameter("startup_consistency_trans_thresh", startup_consistency_trans_thresh_);
+
+  double startup_consistency_yaw_thresh_deg = 15.0;
+  this->get_parameter("startup_consistency_yaw_thresh_deg", startup_consistency_yaw_thresh_deg);
+  startup_consistency_yaw_thresh_ = startup_consistency_yaw_thresh_deg * M_PI / 180.0;
+
+  this->get_parameter("startup_consistency_score_ratio", startup_consistency_score_ratio_);
+  this->get_parameter("startup_candidate_max_count", startup_candidate_max_count_);
+  this->get_parameter("startup_yaw_prior_enabled", startup_yaw_prior_enabled_);
+
+  double startup_yaw_prior_deg = 180.0;
+  this->get_parameter("startup_yaw_prior_deg", startup_yaw_prior_deg);
+  startup_yaw_prior_ = normalizeAngle(startup_yaw_prior_deg * M_PI / 180.0);
+
+  double startup_yaw_prior_tolerance_deg = 60.0;
+  this->get_parameter("startup_yaw_prior_tolerance_deg", startup_yaw_prior_tolerance_deg);
+  startup_yaw_prior_tolerance_ = std::max(0.0, startup_yaw_prior_tolerance_deg * M_PI / 180.0);
+
+  this->get_parameter("enable_court_crop", enable_court_crop_);
+  this->get_parameter("court_crop_x_min", court_crop_x_min_);
+  this->get_parameter("court_crop_x_max", court_crop_x_max_);
+  this->get_parameter("court_crop_y_min", court_crop_y_min_);
+  this->get_parameter("court_crop_y_max", court_crop_y_max_);
+  this->get_parameter("court_crop_margin", court_crop_margin_);
+  this->get_parameter("court_crop_z_min", court_crop_z_min_);
 
   // [x, y, z, roll, pitch, yaw] - init_pose parameters
   if (!init_pose_.empty() && init_pose_.size() >= 6) {
@@ -119,6 +197,12 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
     "initialpose", 10,
     std::bind(&SmallGicpRelocalizationNode::initialPoseCallback, this, std::placeholders::_1));
 
+  odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+    odom_topic_, 10,
+    std::bind(&SmallGicpRelocalizationNode::odometryCallback, this, std::placeholders::_1));
+
+  reset_publisher_ = this->create_publisher<std_msgs::msg::Empty>("/point_lio/reset_state", 10);
+
   // 用一个独立的轻量级线程来跑计算，不占 ROS 线程
   registration_thread_ = std::thread([this]() {
     while (run_thread_ && rclcpp::ok()) {
@@ -127,12 +211,13 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
       } else {
         this->performRegistration();
       }
-      std::this_thread::sleep_for(std::chrono::milliseconds(500)); // 2Hz
+      int sleep_ms = static_cast<int>(1000.0 / std::max(0.01, continuous_update_rate_));
+      std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
     }
   });
 
   transform_timer_ = this->create_wall_timer(
-    std::chrono::milliseconds(50),  // 20 Hz 始终发布 TF
+    std::chrono::milliseconds(10),  // 100 Hz 始终发布 TF
     std::bind(&SmallGicpRelocalizationNode::publishTransform, this));
 
   init_timer_ = this->create_wall_timer(
@@ -163,22 +248,7 @@ void SmallGicpRelocalizationNode::initializeGlobalMap()
     return;
   }
 
-  Eigen::Affine3d odom_to_lidar_odom;
-  try {
-    auto tf_stamped = tf_buffer_->lookupTransform(
-      base_frame_, lidar_frame_, tf2::TimePointZero);
-    odom_to_lidar_odom = tf2::transformToEigen(tf_stamped.transform);
-    RCLCPP_INFO_STREAM(
-      this->get_logger(), "odom_to_lidar_odom: translation = "
-                            << odom_to_lidar_odom.translation().transpose() << ", rpy = "
-                            << odom_to_lidar_odom.rotation().eulerAngles(0, 1, 2).transpose());
-  } catch (tf2::TransformException & ex) {
-    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
-                         "Initial TF lookup failed: %s. Retrying...", ex.what());
-    return;
-  }
-
-  pcl::transformPointCloud(*global_map_, *global_map_, odom_to_lidar_odom);
+  map_flip_tf_ = Eigen::Isometry3d::Identity();
 
   // Downsample points and convert them into pcl::PointCloud<pcl::PointCovariance>
   target_ = small_gicp::voxelgrid_sampling_omp<
@@ -228,6 +298,16 @@ void SmallGicpRelocalizationNode::performRegistration()
     std::swap(accumulated_cloud_, cloud_to_process);
   }
 
+  // 赛场裁剪：把人群点滤掉，只让赛场内的点和场外天花板参与匹配
+  if (enable_court_crop_) {
+    cropCourtCloud(cloud_to_process);
+    if (cloud_to_process->empty()) {
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+        "Court crop removed all points this frame, skipping registration.");
+      return;
+    }
+  }
+
   source_ = small_gicp::voxelgrid_sampling_omp<
     pcl::PointCloud<pcl::PointXYZ>, pcl::PointCloud<pcl::PointCovariance>>(
     *cloud_to_process, registered_leaf_size_);
@@ -265,28 +345,103 @@ void SmallGicpRelocalizationNode::performRegistration()
     double overlap_ratio = std::min(1.0, (double)result.num_inliers / source_->size());
     double rmse = std::sqrt(result.error / result.num_inliers);
     
+    // 退化检测 (Degeneracy Detection)
+    // 分析 Hessian 矩阵特征值，如果最小特征值极小，说明在某方向上没有约束力（如长直走廊）
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, 6, 6>> eigensolver(result.H);
+    double min_eigenvalue = eigensolver.eigenvalues().minCoeff();
+    double degeneracy_metric = min_eigenvalue / std::max(1.0, (double)result.num_inliers);
+    
     // 综合可信度评分 (0~100)
     // 重叠率权重占70%，误差权重占30%（0.5米误差得0分，0误差得满分）
     double overlap_score = overlap_ratio * 100.0;
     double rmse_score = std::max(0.0, 100.0 - (rmse * 200.0));
     double confidence = (overlap_score * 0.7) + (rmse_score * 0.3);
 
-    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 10000, 
-      "[Confidence Report] Overall Score: %.1f/100  (Overlap: %.1f%%, Avg Error: %.3f meters)", 
-      confidence, overlap_ratio * 100.0, rmse);
+    // 如果出现特征退化，轻度惩罚得分，迫使算法要求更高的重叠率才能采信
+    if (degeneracy_metric < 5.0) {
+      double penalty = std::max(0.5, degeneracy_metric / 5.0); // 最多扣减一半分数
+      confidence *= penalty;
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, 
+        "[Degeneracy Warning] Min Eigenvalue metric (%.3f) too low! Penalizing confidence to %.1f", 
+        degeneracy_metric, confidence);
+    }
 
-    // 恢复连续 GICP 重定位：只有在可信度大于 40 分时才更新地图 TF，
-    // 这样既能连续修正 point_lio 的累积漂移，又能防止在走廊等特征稀疏处发生“滑动飘走”。
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 10000, 
+      "[Confidence Report] Overall Score: %.1f/100  (Overlap: %.1f%%, Avg Error: %.3f meters, Eigen: %.2f)", 
+      confidence, overlap_ratio * 100.0, rmse, degeneracy_metric);
+
+    // 恢复连续 GICP 重定位：只有在可信度大于 40 分时才尝试更新地图 TF
     if (confidence > 40.0) {
-      std::lock_guard<std::mutex> lock(pose_mutex_);
-      result_t_ = result.T_target_source;
-      previous_result_t_ = result_t_;
+      lost_tracking_count_ = 0;
+      Eigen::Isometry3d new_pose = result.T_target_source;
+      double translation_diff = (new_pose.translation() - initial_guess.translation()).norm();
+      
+      Eigen::AngleAxisd angle_axis(new_pose.linear().transpose() * initial_guess.linear());
+      double angle_diff = std::abs(angle_axis.angle());
+
+      // 死区拦截 (Deadband Interception)
+      if (translation_diff > update_min_translation_ || angle_diff > update_min_rotation_) {
+        std::lock_guard<std::mutex> lock(pose_mutex_);
+        result_t_ = new_pose;
+        previous_result_t_ = result_t_;
+        RCLCPP_INFO(this->get_logger(), "★ ★ GICP 已更正 ★ ★ 平移纠正: %.3f米, 旋转纠正: %.3f弧度", translation_diff, angle_diff);
+      } else {
+        RCLCPP_DEBUG(this->get_logger(), "GICP 误差极小 (%.3f米), 跳过更正，保持 Point-LIO 丝滑轨迹", translation_diff);
+      }
     } else {
+      lost_tracking_count_++;
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, 
         "GICP confidence too low (%.1f), skipping continuous TF update to prevent drift.", confidence);
+      if (lost_tracking_count_ > 2) {
+        RCLCPP_ERROR(this->get_logger(), "Tracking lost for too long (confidence low)! Triggering re-initialization...");
+        
+        // 1. Immediately reset Point-LIO
+        std_msgs::msg::Empty reset_msg;
+        reset_publisher_->publish(reset_msg);
+
+        // 2. Break the TF to trigger safe stop
+        global_search_done_ = false;
+        use_relocalization_search_range_ = true;
+        clearStartupCandidates();
+        lost_tracking_count_ = 0;
+        
+        // 3. Freeze the robot's pose in the map to the last known good pose
+        {
+          std::lock_guard<std::mutex> lock(pose_mutex_);
+          Eigen::Isometry3d last_good_map_to_base_link = result_t_ * last_good_odom_to_base_link_;
+          result_t_ = last_good_map_to_base_link;
+          previous_result_t_ = result_t_;
+        }
+        
+        // 4. Clear the garbage points
+        std::lock_guard<std::mutex> cloud_lock(cloud_mutex_);
+        accumulated_cloud_->clear();
+      }
     }
   } else {
+    lost_tracking_count_++;
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "GICP did not converge.");
+    if (lost_tracking_count_ > 2) {
+      RCLCPP_ERROR(this->get_logger(), "Tracking lost for too long (no converge)! Triggering re-initialization...");
+      
+      std_msgs::msg::Empty reset_msg;
+      reset_publisher_->publish(reset_msg);
+
+      global_search_done_ = false;
+      use_relocalization_search_range_ = true;
+      clearStartupCandidates();
+      lost_tracking_count_ = 0;
+      
+      {
+        std::lock_guard<std::mutex> lock(pose_mutex_);
+        Eigen::Isometry3d last_good_map_to_base_link = result_t_ * last_good_odom_to_base_link_;
+        result_t_ = last_good_map_to_base_link;
+        previous_result_t_ = result_t_;
+      }
+      
+      std::lock_guard<std::mutex> cloud_lock(cloud_mutex_);
+      accumulated_cloud_->clear();
+    }
   }
 }
 
@@ -350,11 +505,217 @@ void SmallGicpRelocalizationNode::initialPoseCallback(
     std::lock_guard<std::mutex> lock(pose_mutex_);
     previous_result_t_ = result_t_ = map_to_odom;
     global_search_done_ = true;
+    use_relocalization_search_range_ = false;
+    clearStartupCandidates();
   } catch (tf2::TransformException & ex) {
     RCLCPP_WARN(
       this->get_logger(), "Could not transform initial pose from %s to %s: %s",
       robot_base_frame_.c_str(), current_scan_frame_id_.c_str(), ex.what());
   }
+}
+
+void SmallGicpRelocalizationNode::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
+{
+  if (!global_search_done_) {
+    return;
+  }
+
+  double v_x = msg->twist.twist.linear.x;
+  double v_y = msg->twist.twist.linear.y;
+  double v_z = msg->twist.twist.linear.z;
+  double speed = std::sqrt(v_x * v_x + v_y * v_y + v_z * v_z);
+
+  double z_height = msg->pose.pose.position.z;
+
+  bool is_diverged = false;
+  if (speed > max_divergence_speed_) {
+    RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+      "[DIVERGENCE FAST-KILL] Velocity %.2f m/s exceeds limit (%.2f)! Point-LIO has drifted.", speed, max_divergence_speed_);
+    is_diverged = true;
+  } else if (z_height < -max_z_deviation_ || z_height > max_z_deviation_) {
+    RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+      "[DIVERGENCE FAST-KILL] Z height %.2f exceeds limits [%.2f, %.2f]! Point-LIO has drifted.", z_height, -max_z_deviation_, max_z_deviation_);
+    is_diverged = true;
+  }
+
+  if (is_diverged) {
+    global_search_done_ = false;
+    use_relocalization_search_range_ = true;
+    clearStartupCandidates();
+    lost_tracking_count_ = 0;
+    
+    // 1. Immediately reset Point-LIO so it stops publishing garbage
+    std_msgs::msg::Empty reset_msg;
+    reset_publisher_->publish(reset_msg);
+
+    // 2. Freeze the robot's pose in the map to the last known good pose
+    std::lock_guard<std::mutex> lock(pose_mutex_);
+    Eigen::Isometry3d last_good_map_to_base_link = result_t_ * last_good_odom_to_base_link_;
+    // Because Point-LIO is reset, its new odom -> base_link will start from Identity.
+    // To keep map -> base_link continuous, we set map -> odom to the last known map -> base_link.
+    result_t_ = last_good_map_to_base_link;
+    previous_result_t_ = result_t_; // CRITICAL: Ensure previous_result_t_ is also updated for local search center
+    
+    // 3. Clear accumulated garbage points
+    std::lock_guard<std::mutex> cloud_lock(cloud_mutex_);
+    accumulated_cloud_->clear();
+    
+    RCLCPP_WARN(this->get_logger(), "Point-LIO reset early! map->odom frozen to maintain TF tree.");
+  } else {
+    // Record the good odom
+    Eigen::Translation3d t(msg->pose.pose.position.x, msg->pose.pose.position.y, msg->pose.pose.position.z);
+    Eigen::Quaterniond q(msg->pose.pose.orientation.w, msg->pose.pose.orientation.x, msg->pose.pose.orientation.y, msg->pose.pose.orientation.z);
+    std::lock_guard<std::mutex> lock(pose_mutex_);
+    last_good_odom_to_base_link_ = t * q;
+  }
+}
+
+void SmallGicpRelocalizationNode::cropCourtCloud(
+  pcl::PointCloud<pcl::PointXYZ>::Ptr & cloud)
+{
+  if (cloud->empty()) {
+    return;
+  }
+
+  // source 点在 odom 系。先用当前位姿估计投到 target（翻转）系，再用 T_flip 逆投回原始地图系，
+  // 这样就能直接用 transform_map.py 那套地图系坐标做判定，无需手动镜像。
+  Eigen::Isometry3d src_to_map;
+  {
+    std::lock_guard<std::mutex> lock(pose_mutex_);
+    src_to_map = map_flip_tf_.inverse() * previous_result_t_;
+  }
+
+  const double x_min = court_crop_x_min_ - court_crop_margin_;
+  const double x_max = court_crop_x_max_ + court_crop_margin_;
+  const double y_min = court_crop_y_min_ - court_crop_margin_;
+  const double y_max = court_crop_y_max_ + court_crop_margin_;
+
+  pcl::PointCloud<pcl::PointXYZ>::Ptr kept(new pcl::PointCloud<pcl::PointXYZ>());
+  kept->points.reserve(cloud->points.size());
+
+  for (const auto & pt : cloud->points) {
+    Eigen::Vector3d p_map = src_to_map * Eigen::Vector3d(pt.x, pt.y, pt.z);
+    bool in_court = (p_map.x() >= x_min && p_map.x() <= x_max &&
+                     p_map.y() >= y_min && p_map.y() <= y_max);
+    bool high_enough = p_map.z() > court_crop_z_min_;
+    if (in_court || high_enough) {
+      kept->points.push_back(pt);
+    }
+  }
+
+  kept->width = kept->points.size();
+  kept->height = 1;
+  kept->is_dense = cloud->is_dense;
+  kept->header = cloud->header;
+
+  RCLCPP_DEBUG_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+    "Court crop: kept %zu / %zu points.", kept->points.size(), cloud->points.size());
+
+  cloud.swap(kept);
+}
+
+void SmallGicpRelocalizationNode::clearStartupCandidates()
+{
+  std::lock_guard<std::mutex> lock(startup_candidate_mutex_);
+  startup_candidates_.clear();
+  startup_candidate_sequence_ = 0;
+}
+
+double SmallGicpRelocalizationNode::normalizeAngle(double angle) const
+{
+  while (angle > M_PI) {
+    angle -= 2.0 * M_PI;
+  }
+  while (angle < -M_PI) {
+    angle += 2.0 * M_PI;
+  }
+  return angle;
+}
+
+double SmallGicpRelocalizationNode::getYawFromPose(const Eigen::Isometry3d & pose) const
+{
+  const Eigen::Matrix3d rotation = pose.linear();
+  return std::atan2(rotation(1, 0), rotation(0, 0));
+}
+
+std::vector<double> SmallGicpRelocalizationNode::buildStartupYawCandidates(int yaw_samples) const
+{
+  const int safe_yaw_samples = std::max(1, yaw_samples);
+  const double yaw_step = 2.0 * M_PI / safe_yaw_samples;
+  std::vector<double> yaw_candidates;
+  yaw_candidates.reserve(safe_yaw_samples);
+
+  for (int iyaw = 0; iyaw < safe_yaw_samples; ++iyaw) {
+    const double yaw = normalizeAngle(iyaw * yaw_step);
+    if (!startup_yaw_prior_enabled_) {
+      yaw_candidates.push_back(yaw);
+      continue;
+    }
+
+    const double yaw_diff = std::abs(normalizeAngle(yaw - startup_yaw_prior_));
+    if (yaw_diff <= startup_yaw_prior_tolerance_) {
+      yaw_candidates.push_back(yaw);
+    }
+  }
+
+  if (yaw_candidates.empty()) {
+    yaw_candidates.push_back(startup_yaw_prior_);
+  }
+
+  return yaw_candidates;
+}
+
+bool SmallGicpRelocalizationNode::isStartupCandidateConsistent(
+  const StartupCandidate & history, const Eigen::Isometry3d & candidate_pose,
+  double candidate_score) const
+{
+  const Eigen::Vector3d delta = history.pose.translation() - candidate_pose.translation();
+  const double xy_diff = std::hypot(delta.x(), delta.y());
+  const double yaw_diff = std::abs(
+    normalizeAngle(getYawFromPose(history.pose) - getYawFromPose(candidate_pose)));
+  const double worse_score = std::max(history.score, candidate_score);
+  const double better_score = std::max(1e-6, std::min(history.score, candidate_score));
+  const double score_ratio = worse_score / better_score;
+
+  return xy_diff <= startup_consistency_trans_thresh_ &&
+         yaw_diff <= startup_consistency_yaw_thresh_ &&
+         score_ratio <= startup_consistency_score_ratio_;
+}
+
+bool SmallGicpRelocalizationNode::acceptStartupCandidate(
+  const Eigen::Isometry3d & candidate_pose, double candidate_score,
+  Eigen::Isometry3d & accepted_pose, double & accepted_score, int & matched_sequence)
+{
+  if (!startup_consistency_enabled_) {
+    accepted_pose = candidate_pose;
+    accepted_score = candidate_score;
+    matched_sequence = 1;
+    return true;
+  }
+
+  std::lock_guard<std::mutex> lock(startup_candidate_mutex_);
+  for (const auto & history : startup_candidates_) {
+    if (isStartupCandidateConsistent(history, candidate_pose, candidate_score)) {
+      if (candidate_score <= history.score) {
+        accepted_pose = candidate_pose;
+        accepted_score = candidate_score;
+      } else {
+        accepted_pose = history.pose;
+        accepted_score = history.score;
+      }
+      matched_sequence = history.sequence;
+      startup_candidates_.clear();
+      startup_candidate_sequence_ = 0;
+      return true;
+    }
+  }
+
+  startup_candidates_.push_back({candidate_pose, candidate_score, ++startup_candidate_sequence_});
+  if (startup_candidate_max_count_ > 0 &&
+      static_cast<int>(startup_candidates_.size()) > startup_candidate_max_count_) {
+    startup_candidates_.erase(startup_candidates_.begin());
+  }
+  return false;
 }
 
 void SmallGicpRelocalizationNode::performGlobalSearch()
@@ -367,7 +728,7 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
   
   {
     std::lock_guard<std::mutex> lock(cloud_mutex_);
-    if (accumulated_cloud_->empty() || accumulated_cloud_->size() < 15000) {
+    if (accumulated_cloud_->empty() || accumulated_cloud_->size() < 5000) {
       RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
         "Waiting for more points to perform global search... current size: %zu", accumulated_cloud_->size());
       return;
@@ -388,23 +749,57 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
 
   std::vector<Eigen::Isometry3d> coarse_candidates;
   
-  int samples_x = std::max(1, static_cast<int>(std::ceil((map_filter_x_max_ - map_filter_x_min_) / global_search_coarse_step_)));
-  int samples_y = std::max(1, static_cast<int>(std::ceil((map_filter_y_max_ - map_filter_y_min_) / global_search_coarse_step_)));
-  
-  double x_step = (samples_x > 1) ? ((map_filter_x_max_ - map_filter_x_min_) / (samples_x - 1)) : 0.0;
-  double y_step = (samples_y > 1) ? ((map_filter_y_max_ - map_filter_y_min_) / (samples_y - 1)) : 0.0;
-  double yaw_step = 2.0 * M_PI / std::max(1, global_search_coarse_yaw_samples_);
+  const bool use_relocalization_range = use_relocalization_search_range_.load();
+  double search_x_min = use_relocalization_range ? relocalization_map_filter_x_min_ : map_filter_x_min_;
+  double search_x_max = use_relocalization_range ? relocalization_map_filter_x_max_ : map_filter_x_max_;
+  double search_y_min = use_relocalization_range ? relocalization_map_filter_y_min_ : map_filter_y_min_;
+  double search_y_max = use_relocalization_range ? relocalization_map_filter_y_max_ : map_filter_y_max_;
+  int search_threads = omp_get_max_threads(); // Full CPU for global search
+  Eigen::Isometry3d search_center;
+  {
+    std::lock_guard<std::mutex> lock(pose_mutex_);
+    search_center = previous_result_t_;
+  }
 
-  RCLCPP_INFO(this->get_logger(), "Global search coarse grid: %dx%d samples (step: %.2fm)", samples_x, samples_y, global_search_coarse_step_);
+  if (!enable_global_search_) {
+    // 1-meter local search around last known pose (previous_result_t_)
+    double origin_x = search_center.translation().x();
+    double origin_y = search_center.translation().y();
+    search_x_min = origin_x - 2.0;
+    search_x_max = origin_x + 2.0;
+    search_y_min = origin_y - 2.0;
+    search_y_max = origin_y + 2.0;
+    search_threads = num_threads_; // Limit CPU for local search
+    RCLCPP_INFO(this->get_logger(), "Global search disabled. Performing 1-meter local initialization around [%.2f, %.2f]...", origin_x, origin_y);
+  }
+
+  double step = enable_global_search_ ? global_search_coarse_step_ : global_search_step_;
+  if (use_relocalization_range && relocalization_global_search_coarse_step_ > 0.0) {
+    step = relocalization_global_search_coarse_step_;
+  }
+  int samples_x = std::max(1, static_cast<int>(std::round((search_x_max - search_x_min) / step)) + 1);
+  int samples_y = std::max(1, static_cast<int>(std::round((search_y_max - search_y_min) / step)) + 1);
+  
+  double x_step = (samples_x > 1) ? ((search_x_max - search_x_min) / (samples_x - 1)) : 0.0;
+  double y_step = (samples_y > 1) ? ((search_y_max - search_y_min) / (samples_y - 1)) : 0.0;
+  
+  int yaw_samples = enable_global_search_ ? global_search_coarse_yaw_samples_ : global_search_yaw_samples_;
+  const auto yaw_candidates = buildStartupYawCandidates(yaw_samples);
+
+  RCLCPP_INFO(
+    this->get_logger(),
+    "%s search grid: %dx%d samples (step: %.2fm), %zu/%d yaw samples, x[%.2f, %.2f], y[%.2f, %.2f]",
+    use_relocalization_range ? "Relocalization" : "Startup",
+    samples_x, samples_y, step, yaw_candidates.size(), yaw_samples,
+    search_x_min, search_x_max, search_y_min, search_y_max);
 
   for (int ix = 0; ix < samples_x; ++ix) {
-    double x = map_filter_x_min_ + ix * x_step;
+    double x = search_x_min + ix * x_step;
     for (int iy = 0; iy < samples_y; ++iy) {
-      double y = map_filter_y_min_ + iy * y_step;
-      for (int iyaw = 0; iyaw < global_search_coarse_yaw_samples_; ++iyaw) {
-        double yaw = iyaw * yaw_step;
+      double y = search_y_min + iy * y_step;
+      for (const double yaw : yaw_candidates) {
         Eigen::Isometry3d guess = Eigen::Isometry3d::Identity();
-        guess.translation() << x, y, 0.0;
+        guess.translation() << x, y, search_center.translation().z();
         guess.linear() = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
         coarse_candidates.push_back(guess);
       }
@@ -424,8 +819,7 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
   };
   std::vector<CandidateResult> top_candidates;
 
-  // 释放全部 CPU 性能，不受参数 num_threads_ 限制
-  #pragma omp parallel for
+  #pragma omp parallel for num_threads(search_threads)
   for (size_t i = 0; i < coarse_candidates.size(); ++i) {
     small_gicp::Registration<small_gicp::GICPFactor, small_gicp::ParallelReductionOMP> local_reg;
     local_reg.reduction.num_threads = 1; 
@@ -440,11 +834,13 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
       
       std::lock_guard<std::mutex> lock(top_mutex);
       top_candidates.push_back({score, result.T_target_source});
-      std::sort(top_candidates.begin(), top_candidates.end());
-      if (top_candidates.size() > 5) {
-          top_candidates.pop_back();
-      }
     }
+  }
+
+  // 移出多线程循环外部进行排序，彻底消除多线程锁等待和排序的性能瓶颈
+  std::sort(top_candidates.begin(), top_candidates.end());
+  if (top_candidates.size() > 5) {
+      top_candidates.resize(5);
   }
 
   if (top_candidates.empty()) {
@@ -472,7 +868,7 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
   Eigen::Isometry3d best_pose = Eigen::Isometry3d::Identity();
   bool found_valid = false;
 
-  #pragma omp parallel for
+  #pragma omp parallel for num_threads(search_threads)
   for (size_t i = 0; i < top_candidates.size(); ++i) {
     small_gicp::Registration<small_gicp::GICPFactor, small_gicp::ParallelReductionOMP> local_reg;
     local_reg.reduction.num_threads = 1; 
@@ -498,13 +894,37 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
 
   if (found_valid) {
-    std::lock_guard<std::mutex> lock(pose_mutex_);
-    previous_result_t_ = result_t_ = best_pose;
-    global_search_done_ = true;
-    RCLCPP_INFO(this->get_logger(), "==========================================================");
-    RCLCPP_INFO(this->get_logger(), "★ ★ ★ GLOBAL INITIALIZATION SUCCESSFUL ★ ★ ★");
-    RCLCPP_INFO(this->get_logger(), "Best score: %f. Time taken: %ld ms", best_score, duration);
-    RCLCPP_INFO(this->get_logger(), "==========================================================");
+    Eigen::Isometry3d accepted_pose = Eigen::Isometry3d::Identity();
+    double accepted_score = std::numeric_limits<double>::max();
+    int matched_sequence = 0;
+    const bool accepted = acceptStartupCandidate(
+      best_pose, best_score, accepted_pose, accepted_score, matched_sequence);
+
+    if (accepted) {
+      std::lock_guard<std::mutex> lock(pose_mutex_);
+      
+      // Since Point-LIO was already reset at the moment of divergence, 
+      // the accumulated_cloud_ we just matched is relative to the NEW odom frame.
+      // Therefore, accepted_pose is EXACTLY the new map -> odom_new! No complex math needed.
+      previous_result_t_ = result_t_ = accepted_pose;
+      global_search_done_ = true;
+      use_relocalization_search_range_ = false;
+      lost_tracking_count_ = 0;
+      
+      RCLCPP_INFO(this->get_logger(), "==========================================================");
+      RCLCPP_INFO(this->get_logger(), "★ ★ ★ GLOBAL INITIALIZATION SUCCESSFUL ★ ★ ★");
+      RCLCPP_INFO(
+        this->get_logger(),
+        "Accepted startup candidate matched with candidate #%d. Best score: %f. Accepted score: %f. Time taken: %ld ms",
+        matched_sequence, best_score, accepted_score, duration);
+      RCLCPP_INFO(this->get_logger(), "Robot snapped to true global pose. Resuming continuous tracking.");
+      RCLCPP_INFO(this->get_logger(), "==========================================================");
+    } else {
+      RCLCPP_WARN(
+        this->get_logger(),
+        "Startup candidate cached but not published yet. Waiting for another consistent global search result. Score: %f. Time taken: %ld ms",
+        best_score, duration);
+    }
   } else {
     RCLCPP_WARN(this->get_logger(), "Fine search failed to find a valid pose! Retrying next frame...");
   }

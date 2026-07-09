@@ -256,10 +256,15 @@ void readParameters(std::shared_ptr<rclcpp::Node> & nh)
   } else if (ivox_nearby_type == 26) {
     ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY26;
   } else {
-    // LOG(WARNING) << "unknown ivox_nearby_type, use NEARBY18";
     ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY18;
   }
   p_imu->gravity_ << VEC_FROM_ARRAY(gravity);
+
+  // Fix cut_frame initialization logic
+  cut_frame_init = cut_frame;
+  if (cut_frame && cut_frame_time_interval > 0.0) {
+    cut_frame_num = std::max(1, (int)std::round(0.1 / cut_frame_time_interval));
+  }
 }
 
 Eigen::Matrix<double, 3, 1> SO3ToEuler(const SO3 & rot)
