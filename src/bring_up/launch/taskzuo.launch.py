@@ -70,7 +70,7 @@ def generate_launch_description():
     # 2. 包含 Livox Mid360 雷达驱动 Launch
     livox_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            PathJoinSubstitution([livox_driver_dir, 'launch', 'msg_MID3603_launch.py'])
+            PathJoinSubstitution([livox_driver_dir, 'launch', 'msg_MID360_launch.py'])
         )
     )
 
@@ -162,7 +162,7 @@ def generate_launch_description():
         package='tf2_ros',
         executable='static_transform_publisher',
         name='base_link_to_mid360_imu',
-        arguments=['-0.16', '0', '0', '0', '0', '1.0', '0', 'base_link', 'mid360_imu']
+        arguments=['-0.16', '-0.02329', '0', '0', '0', '1.0', '0', 'base_link', 'mid360_imu']
     )
 
     # 8. 启动 RViz
