@@ -51,6 +51,8 @@ private:
   void performGlobalSearch();
   // 把实时帧点云投回原始地图系，裁掉赛场外的人群点（赛场内全留，场外只留天花板）
   void cropCourtCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr & cloud);
+  void triggerReinitialization(const std::string & reason);
+  void enterInitialPoseFallback(const std::string & reason);
   void publishTransform();
   void initialPoseCallback(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg);
   void odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
@@ -88,11 +90,25 @@ private:
   double continuous_update_rate_;
   double update_min_translation_;
   double update_min_rotation_;
+  int lost_tracking_reinit_count_;
+  double max_continuous_correction_translation_;
+  double max_continuous_correction_rotation_;
+  double max_global_reinit_translation_;
+  double fallback_recovery_confidence_;
 
   double max_divergence_speed_;
   double max_z_deviation_;
 
   bool enable_global_search_;
+  bool enable_initial_pose_fallback_;
+  bool enable_initial_pose_preference_;
+  double initial_pose_fallback_x_;
+  double initial_pose_fallback_y_;
+  double initial_pose_fallback_z_;
+  double initial_pose_fallback_yaw_;
+  double initial_pose_preference_x_;
+  double initial_pose_preference_y_;
+  double initial_pose_preference_score_ratio_;
 
   // 赛场实时裁剪：在原始地图系下，赛场框内全保留，框外只留 Z>court_crop_z_min_ 的天花板点
   bool enable_court_crop_;
@@ -135,6 +151,8 @@ private:
   std::atomic<bool> global_map_initialized_{false};
   std::atomic<bool> is_registering_{false};
   std::atomic<bool> global_search_done_{false};
+  std::atomic<bool> has_global_initialization_{false};
+  std::atomic<bool> using_initial_pose_fallback_{false};
   std::thread registration_thread_;
   std::atomic<bool> run_thread_{true};
   int lost_tracking_count_{0};

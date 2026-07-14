@@ -20,6 +20,10 @@
 #include "small_gicp/util/downsampling_omp.hpp"
 #include "tf2_eigen/tf2_eigen.hpp"
 #include <Eigen/Eigenvalues>
+#include <algorithm>
+#include <cmath>
+#include <iterator>
+#include <limits>
 
 namespace small_gicp_relocalization
 {
@@ -64,11 +68,25 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->declare_parameter("continuous_update_rate", 0.5);
   this->declare_parameter("update_min_translation", 0.03);
   this->declare_parameter("update_min_rotation", 0.02);
+  this->declare_parameter("lost_tracking_reinit_count", 3);
+  this->declare_parameter("max_continuous_correction_translation", 0.0);
+  this->declare_parameter("max_continuous_correction_rotation", 0.0);
+  this->declare_parameter("max_global_reinit_translation", 0.0);
+  this->declare_parameter("fallback_recovery_confidence", 60.0);
 
   this->declare_parameter("max_divergence_speed", 5.0);
   this->declare_parameter("max_z_deviation", 0.5);
 
   this->declare_parameter("enable_global_search", false);
+  this->declare_parameter("enable_initial_pose_fallback", false);
+  this->declare_parameter("enable_initial_pose_preference", false);
+  this->declare_parameter("initial_pose_fallback_x", 0.0);
+  this->declare_parameter("initial_pose_fallback_y", 0.0);
+  this->declare_parameter("initial_pose_fallback_z", 0.0);
+  this->declare_parameter("initial_pose_fallback_yaw", 0.0);
+  this->declare_parameter("initial_pose_preference_x", 0.0);
+  this->declare_parameter("initial_pose_preference_y", 0.0);
+  this->declare_parameter("initial_pose_preference_score_ratio", 2.0);
 
   // 赛场实时裁剪参数（原始地图系，与 transform_map.py 的裁剪框一致）
   this->declare_parameter("enable_court_crop", true);
@@ -114,11 +132,26 @@ SmallGicpRelocalizationNode::SmallGicpRelocalizationNode(const rclcpp::NodeOptio
   this->get_parameter("continuous_update_rate", continuous_update_rate_);
   this->get_parameter("update_min_translation", update_min_translation_);
   this->get_parameter("update_min_rotation", update_min_rotation_);
+  this->get_parameter("lost_tracking_reinit_count", lost_tracking_reinit_count_);
+  this->get_parameter("max_continuous_correction_translation", max_continuous_correction_translation_);
+  this->get_parameter("max_continuous_correction_rotation", max_continuous_correction_rotation_);
+  this->get_parameter("max_global_reinit_translation", max_global_reinit_translation_);
+  this->get_parameter("fallback_recovery_confidence", fallback_recovery_confidence_);
+  lost_tracking_reinit_count_ = std::max(1, lost_tracking_reinit_count_);
 
   this->get_parameter("max_divergence_speed", max_divergence_speed_);
   this->get_parameter("max_z_deviation", max_z_deviation_);
 
   this->get_parameter("enable_global_search", enable_global_search_);
+  this->get_parameter("enable_initial_pose_fallback", enable_initial_pose_fallback_);
+  this->get_parameter("enable_initial_pose_preference", enable_initial_pose_preference_);
+  this->get_parameter("initial_pose_fallback_x", initial_pose_fallback_x_);
+  this->get_parameter("initial_pose_fallback_y", initial_pose_fallback_y_);
+  this->get_parameter("initial_pose_fallback_z", initial_pose_fallback_z_);
+  this->get_parameter("initial_pose_fallback_yaw", initial_pose_fallback_yaw_);
+  this->get_parameter("initial_pose_preference_x", initial_pose_preference_x_);
+  this->get_parameter("initial_pose_preference_y", initial_pose_preference_y_);
+  this->get_parameter("initial_pose_preference_score_ratio", initial_pose_preference_score_ratio_);
 
   this->get_parameter("enable_court_crop", enable_court_crop_);
   this->get_parameter("court_crop_x_min", court_crop_x_min_);
@@ -241,6 +274,57 @@ void SmallGicpRelocalizationNode::registeredPcdCallback(
   *accumulated_cloud_ += *scan;
 }
 
+void SmallGicpRelocalizationNode::triggerReinitialization(const std::string & reason)
+{
+  RCLCPP_ERROR(this->get_logger(), "%s Triggering re-initialization...", reason.c_str());
+
+  std_msgs::msg::Empty reset_msg;
+  reset_publisher_->publish(reset_msg);
+
+  global_search_done_ = false;
+  using_initial_pose_fallback_ = false;
+  lost_tracking_count_ = 0;
+
+  {
+    std::lock_guard<std::mutex> lock(pose_mutex_);
+    Eigen::Isometry3d last_good_map_to_base_link = result_t_ * last_good_odom_to_base_link_;
+    result_t_ = last_good_map_to_base_link;
+    previous_result_t_ = result_t_;
+  }
+
+  {
+    std::lock_guard<std::mutex> cloud_lock(cloud_mutex_);
+    accumulated_cloud_->clear();
+  }
+}
+
+void SmallGicpRelocalizationNode::enterInitialPoseFallback(const std::string & reason)
+{
+  if (!enable_initial_pose_fallback_ || has_global_initialization_.load()) {
+    return;
+  }
+
+  Eigen::Isometry3d fallback_pose = Eigen::Isometry3d::Identity();
+  fallback_pose.translation() << initial_pose_fallback_x_, initial_pose_fallback_y_,
+    initial_pose_fallback_z_;
+  fallback_pose.linear() =
+    Eigen::AngleAxisd(initial_pose_fallback_yaw_, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+
+  {
+    std::lock_guard<std::mutex> lock(pose_mutex_);
+    previous_result_t_ = result_t_ = fallback_pose;
+  }
+
+  lost_tracking_count_ = 0;
+  using_initial_pose_fallback_ = true;
+  global_search_done_ = true;
+
+  RCLCPP_WARN(this->get_logger(),
+    "%s Entering initial-pose fallback at [%.2f, %.2f, %.2f, yaw %.2f]. Waiting for GICP confidence >= %.1f.",
+    reason.c_str(), initial_pose_fallback_x_, initial_pose_fallback_y_,
+    initial_pose_fallback_z_, initial_pose_fallback_yaw_, fallback_recovery_confidence_);
+}
+
 void SmallGicpRelocalizationNode::performRegistration()
 {
   if (!global_map_initialized_) {
@@ -330,73 +414,83 @@ void SmallGicpRelocalizationNode::performRegistration()
       "[Confidence Report] Overall Score: %.1f/100  (Overlap: %.1f%%, Avg Error: %.3f meters, Eigen: %.2f)", 
       confidence, overlap_ratio * 100.0, rmse, degeneracy_metric);
 
-    // 恢复连续 GICP 重定位：只有在可信度大于 40 分时才尝试更新地图 TF
-    if (confidence > 40.0) {
-      lost_tracking_count_ = 0;
+    const bool in_initial_pose_fallback = using_initial_pose_fallback_.load();
+    const double required_confidence =
+      in_initial_pose_fallback ? fallback_recovery_confidence_ : 40.0;
+
+    const bool confidence_accepted =
+      in_initial_pose_fallback ? (confidence >= required_confidence) : (confidence > required_confidence);
+
+    // 恢复连续 GICP 重定位：正常模式保持原来的 >40 分阈值，初始值保底模式达到恢复阈值即可。
+    if (confidence_accepted) {
       Eigen::Isometry3d new_pose = result.T_target_source;
       double translation_diff = (new_pose.translation() - initial_guess.translation()).norm();
       
       Eigen::AngleAxisd angle_axis(new_pose.linear().transpose() * initial_guess.linear());
       double angle_diff = std::abs(angle_axis.angle());
 
+      const bool translation_jump_too_large =
+        max_continuous_correction_translation_ > 0.0 &&
+        translation_diff > max_continuous_correction_translation_;
+      const bool rotation_jump_too_large =
+        max_continuous_correction_rotation_ > 0.0 &&
+        angle_diff > max_continuous_correction_rotation_;
+      if (translation_jump_too_large || rotation_jump_too_large) {
+        lost_tracking_count_++;
+        RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+          "GICP correction rejected: translation %.3fm, rotation %.3frad exceeds limits %.3fm / %.3frad.",
+          translation_diff, angle_diff,
+          max_continuous_correction_translation_, max_continuous_correction_rotation_);
+        if (lost_tracking_count_ >= lost_tracking_reinit_count_) {
+          triggerReinitialization("Tracking lost for too long (large correction)!");
+        }
+        return;
+      }
+
+      lost_tracking_count_ = 0;
+
       // 死区拦截 (Deadband Interception)
       if (translation_diff > update_min_translation_ || angle_diff > update_min_rotation_) {
         std::lock_guard<std::mutex> lock(pose_mutex_);
         result_t_ = new_pose;
         previous_result_t_ = result_t_;
+        if (in_initial_pose_fallback) {
+          using_initial_pose_fallback_ = false;
+          has_global_initialization_ = true;
+          RCLCPP_INFO(this->get_logger(), "Initial-pose fallback recovered by GICP confidence %.1f.", confidence);
+        }
         RCLCPP_INFO(this->get_logger(), "★ ★ GICP 已更正 ★ ★ 平移纠正: %.3f米, 旋转纠正: %.3f弧度", translation_diff, angle_diff);
       } else {
+        if (in_initial_pose_fallback) {
+          using_initial_pose_fallback_ = false;
+          has_global_initialization_ = true;
+          RCLCPP_INFO(this->get_logger(), "Initial-pose fallback recovered with small GICP correction, confidence %.1f.", confidence);
+        }
         RCLCPP_DEBUG(this->get_logger(), "GICP 误差极小 (%.3f米), 跳过更正，保持 Point-LIO 丝滑轨迹", translation_diff);
       }
     } else {
       lost_tracking_count_++;
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000, 
         "GICP confidence too low (%.1f), skipping continuous TF update to prevent drift.", confidence);
-      if (lost_tracking_count_ > 2) {
-        RCLCPP_ERROR(this->get_logger(), "Tracking lost for too long (confidence low)! Triggering re-initialization...");
-        
-        // 1. Immediately reset Point-LIO
-        std_msgs::msg::Empty reset_msg;
-        reset_publisher_->publish(reset_msg);
-
-        // 2. Break the TF to trigger safe stop
-        global_search_done_ = false;
-        lost_tracking_count_ = 0;
-        
-        // 3. Freeze the robot's pose in the map to the last known good pose
-        {
-          std::lock_guard<std::mutex> lock(pose_mutex_);
-          Eigen::Isometry3d last_good_map_to_base_link = result_t_ * last_good_odom_to_base_link_;
-          result_t_ = last_good_map_to_base_link;
-          previous_result_t_ = result_t_;
-        }
-        
-        // 4. Clear the garbage points
-        std::lock_guard<std::mutex> cloud_lock(cloud_mutex_);
-        accumulated_cloud_->clear();
+      if (in_initial_pose_fallback) {
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+          "Initial-pose fallback active; keeping odometry until confidence reaches %.1f.", required_confidence);
+        return;
+      }
+      if (lost_tracking_count_ >= lost_tracking_reinit_count_) {
+        triggerReinitialization("Tracking lost for too long (confidence low)!");
       }
     }
   } else {
     lost_tracking_count_++;
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, "GICP did not converge.");
-    if (lost_tracking_count_ > 2) {
-      RCLCPP_ERROR(this->get_logger(), "Tracking lost for too long (no converge)! Triggering re-initialization...");
-      
-      std_msgs::msg::Empty reset_msg;
-      reset_publisher_->publish(reset_msg);
-
-      global_search_done_ = false;
-      lost_tracking_count_ = 0;
-      
-      {
-        std::lock_guard<std::mutex> lock(pose_mutex_);
-        Eigen::Isometry3d last_good_map_to_base_link = result_t_ * last_good_odom_to_base_link_;
-        result_t_ = last_good_map_to_base_link;
-        previous_result_t_ = result_t_;
-      }
-      
-      std::lock_guard<std::mutex> cloud_lock(cloud_mutex_);
-      accumulated_cloud_->clear();
+    if (using_initial_pose_fallback_.load()) {
+      RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+        "Initial-pose fallback active; keeping odometry while GICP has not converged.");
+      return;
+    }
+    if (lost_tracking_count_ >= lost_tracking_reinit_count_) {
+      triggerReinitialization("Tracking lost for too long (no converge)!");
     }
   }
 }
@@ -461,6 +555,8 @@ void SmallGicpRelocalizationNode::initialPoseCallback(
     std::lock_guard<std::mutex> lock(pose_mutex_);
     previous_result_t_ = result_t_ = map_to_odom;
     global_search_done_ = true;
+    has_global_initialization_ = true;
+    using_initial_pose_fallback_ = false;
   } catch (tf2::TransformException & ex) {
     RCLCPP_WARN(
       this->get_logger(), "Could not transform initial pose from %s to %s: %s",
@@ -607,6 +703,13 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
     std::lock_guard<std::mutex> lock(pose_mutex_);
     search_center = previous_result_t_;
   }
+  const bool use_initial_pose_preference =
+    enable_initial_pose_preference_ && !has_global_initialization_.load();
+  auto distance_to_initial_preference = [this](const Eigen::Isometry3d & pose) {
+    const double dx = pose.translation().x() - initial_pose_preference_x_;
+    const double dy = pose.translation().y() - initial_pose_preference_y_;
+    return std::sqrt(dx * dx + dy * dy);
+  };
 
   if (!enable_global_search_) {
     // 1-meter local search around last known pose (previous_result_t_)
@@ -679,14 +782,49 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
 
   // 移出多线程循环外部进行排序，彻底消除多线程锁等待和排序的性能瓶颈
   std::sort(top_candidates.begin(), top_candidates.end());
-  if (top_candidates.size() > 5) {
-      top_candidates.resize(5);
-  }
 
   if (top_candidates.empty()) {
       RCLCPP_WARN(this->get_logger(), "Coarse search failed to find any valid candidates! Retrying next frame...");
+      enterInitialPoseFallback("Coarse global search failed.");
       return;
   }
+
+  const size_t keep_count = std::min<size_t>(5, top_candidates.size());
+  if (use_initial_pose_preference && keep_count > 0) {
+    const double best_raw_score = top_candidates.front().score;
+    const double score_limit = initial_pose_preference_score_ratio_ > 0.0 ?
+      best_raw_score * initial_pose_preference_score_ratio_ :
+      std::numeric_limits<double>::infinity();
+    auto closest_it = top_candidates.end();
+    double closest_dist = std::numeric_limits<double>::infinity();
+
+    for (auto it = top_candidates.begin(); it != top_candidates.end(); ++it) {
+      if (it->score > score_limit) {
+        continue;
+      }
+      double dist = distance_to_initial_preference(it->pose);
+      if (dist < closest_dist) {
+        closest_dist = dist;
+        closest_it = it;
+      }
+    }
+
+    if (closest_it != top_candidates.end()) {
+      const bool already_kept =
+        static_cast<size_t>(std::distance(top_candidates.begin(), closest_it)) < keep_count;
+      if (!already_kept) {
+        top_candidates[keep_count - 1] = *closest_it;
+      }
+      RCLCPP_INFO(this->get_logger(),
+        "Initial pose preference kept coarse candidate %.2fm from [%.2f, %.2f].",
+        closest_dist, initial_pose_preference_x_, initial_pose_preference_y_);
+    }
+  }
+
+  if (top_candidates.size() > keep_count) {
+      top_candidates.resize(keep_count);
+  }
+  std::sort(top_candidates.begin(), top_candidates.end());
 
   RCLCPP_INFO(this->get_logger(), "Coarse search finished. Best score: %f. Starting fine search...", top_candidates.front().score);
 
@@ -707,6 +845,7 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
   double best_score = std::numeric_limits<double>::max();
   Eigen::Isometry3d best_pose = Eigen::Isometry3d::Identity();
   bool found_valid = false;
+  std::vector<CandidateResult> fine_candidates;
 
   #pragma omp parallel for num_threads(search_threads)
   for (size_t i = 0; i < top_candidates.size(); ++i) {
@@ -722,16 +861,52 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
       double score = (result.error + (total_points - result.num_inliers) * max_dist_sq_) / total_points;
       
       std::lock_guard<std::mutex> lock(top_mutex);
-      if (score < best_score) {
-        best_score = score;
-        best_pose = result.T_target_source;
-        found_valid = true;
-      }
+      fine_candidates.push_back({score, result.T_target_source});
     }
   }
 
   auto end_time = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+
+  if (!fine_candidates.empty()) {
+    std::sort(fine_candidates.begin(), fine_candidates.end());
+    best_score = fine_candidates.front().score;
+    best_pose = fine_candidates.front().pose;
+    found_valid = true;
+
+    if (use_initial_pose_preference) {
+      const double score_limit = initial_pose_preference_score_ratio_ > 0.0 ?
+        best_score * initial_pose_preference_score_ratio_ :
+        std::numeric_limits<double>::infinity();
+      double closest_dist = std::numeric_limits<double>::infinity();
+
+      for (const auto & candidate : fine_candidates) {
+        if (candidate.score > score_limit) {
+          continue;
+        }
+        double dist = distance_to_initial_preference(candidate.pose);
+        if (dist < closest_dist) {
+          closest_dist = dist;
+          best_score = candidate.score;
+          best_pose = candidate.pose;
+        }
+      }
+
+      RCLCPP_INFO(this->get_logger(),
+        "Initial pose preference selected fine result %.2fm from [%.2f, %.2f].",
+        closest_dist, initial_pose_preference_x_, initial_pose_preference_y_);
+    }
+  }
+
+  if (found_valid && has_global_initialization_.load() && max_global_reinit_translation_ > 0.0) {
+    const double jump = (best_pose.translation() - search_center.translation()).norm();
+    if (jump > max_global_reinit_translation_) {
+      RCLCPP_WARN(this->get_logger(),
+        "Global reinitialization rejected: pose jump %.3fm exceeds limit %.3fm.",
+        jump, max_global_reinit_translation_);
+      found_valid = false;
+    }
+  }
 
   if (found_valid) {
     std::lock_guard<std::mutex> lock(pose_mutex_);
@@ -741,6 +916,8 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
     // Therefore, best_pose is EXACTLY the new map -> odom_new! No complex math needed.
     previous_result_t_ = result_t_ = best_pose;
     global_search_done_ = true;
+    has_global_initialization_ = true;
+    using_initial_pose_fallback_ = false;
     
     RCLCPP_INFO(this->get_logger(), "==========================================================");
     RCLCPP_INFO(this->get_logger(), "★ ★ ★ GLOBAL INITIALIZATION SUCCESSFUL ★ ★ ★");
@@ -749,6 +926,7 @@ void SmallGicpRelocalizationNode::performGlobalSearch()
     RCLCPP_INFO(this->get_logger(), "==========================================================");
   } else {
     RCLCPP_WARN(this->get_logger(), "Fine search failed to find a valid pose! Retrying next frame...");
+    enterInitialPoseFallback("Fine global search failed.");
   }
 
   {

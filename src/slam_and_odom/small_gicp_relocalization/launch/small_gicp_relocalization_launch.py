@@ -53,6 +53,20 @@ def generate_launch_description():
     global_search_fine_iters = LaunchConfiguration("global_search_fine_iters")
     continuous_update_rate = LaunchConfiguration("continuous_update_rate")
     max_z_deviation = LaunchConfiguration("max_z_deviation")
+    lost_tracking_reinit_count = LaunchConfiguration("lost_tracking_reinit_count")
+    max_continuous_correction_translation = LaunchConfiguration("max_continuous_correction_translation")
+    max_continuous_correction_rotation = LaunchConfiguration("max_continuous_correction_rotation")
+    max_global_reinit_translation = LaunchConfiguration("max_global_reinit_translation")
+    fallback_recovery_confidence = LaunchConfiguration("fallback_recovery_confidence")
+    enable_initial_pose_fallback = LaunchConfiguration("enable_initial_pose_fallback")
+    enable_initial_pose_preference = LaunchConfiguration("enable_initial_pose_preference")
+    initial_pose_fallback_x = LaunchConfiguration("initial_pose_fallback_x")
+    initial_pose_fallback_y = LaunchConfiguration("initial_pose_fallback_y")
+    initial_pose_fallback_z = LaunchConfiguration("initial_pose_fallback_z")
+    initial_pose_fallback_yaw = LaunchConfiguration("initial_pose_fallback_yaw")
+    initial_pose_preference_x = LaunchConfiguration("initial_pose_preference_x")
+    initial_pose_preference_y = LaunchConfiguration("initial_pose_preference_y")
+    initial_pose_preference_score_ratio = LaunchConfiguration("initial_pose_preference_score_ratio")
 
     declare_num_threads = DeclareLaunchArgument(
         "num_threads", default_value="4", description="Number of threads"
@@ -135,6 +149,48 @@ def generate_launch_description():
     declare_max_z_deviation = DeclareLaunchArgument(
         "max_z_deviation", default_value="0.5", description="Maximum allowed odometry Z deviation before reset (meters)"
     )
+    declare_lost_tracking_reinit_count = DeclareLaunchArgument(
+        "lost_tracking_reinit_count", default_value="3", description="Consecutive registration failures before reinitialization"
+    )
+    declare_max_continuous_correction_translation = DeclareLaunchArgument(
+        "max_continuous_correction_translation", default_value="0.0", description="Reject continuous GICP translation jumps above this value; 0 disables"
+    )
+    declare_max_continuous_correction_rotation = DeclareLaunchArgument(
+        "max_continuous_correction_rotation", default_value="0.0", description="Reject continuous GICP rotation jumps above this value; 0 disables"
+    )
+    declare_max_global_reinit_translation = DeclareLaunchArgument(
+        "max_global_reinit_translation", default_value="0.0", description="Reject global reinitialization jumps from the last pose; 0 disables"
+    )
+    declare_fallback_recovery_confidence = DeclareLaunchArgument(
+        "fallback_recovery_confidence", default_value="60.0", description="GICP confidence required to leave initial-pose fallback"
+    )
+    declare_enable_initial_pose_fallback = DeclareLaunchArgument(
+        "enable_initial_pose_fallback", default_value="false", description="Use a configured pose when first global initialization fails"
+    )
+    declare_enable_initial_pose_preference = DeclareLaunchArgument(
+        "enable_initial_pose_preference", default_value="false", description="Prefer first global initialization near the configured start pose"
+    )
+    declare_initial_pose_fallback_x = DeclareLaunchArgument(
+        "initial_pose_fallback_x", default_value="0.0", description="Fallback map->odom x when first global initialization fails"
+    )
+    declare_initial_pose_fallback_y = DeclareLaunchArgument(
+        "initial_pose_fallback_y", default_value="0.0", description="Fallback map->odom y when first global initialization fails"
+    )
+    declare_initial_pose_fallback_z = DeclareLaunchArgument(
+        "initial_pose_fallback_z", default_value="0.0", description="Fallback map->odom z when first global initialization fails"
+    )
+    declare_initial_pose_fallback_yaw = DeclareLaunchArgument(
+        "initial_pose_fallback_yaw", default_value="0.0", description="Fallback map->odom yaw when first global initialization fails"
+    )
+    declare_initial_pose_preference_x = DeclareLaunchArgument(
+        "initial_pose_preference_x", default_value="0.0", description="Preferred first global initialization x"
+    )
+    declare_initial_pose_preference_y = DeclareLaunchArgument(
+        "initial_pose_preference_y", default_value="0.0", description="Preferred first global initialization y"
+    )
+    declare_initial_pose_preference_score_ratio = DeclareLaunchArgument(
+        "initial_pose_preference_score_ratio", default_value="2.0", description="Keep preferred-start candidates within this score ratio of the best score"
+    )
 
     # 赛场实时裁剪参数（原始地图系，与 transform_map.py 的裁剪框保持一致）
     declare_enable_court_crop = DeclareLaunchArgument(
@@ -184,6 +240,20 @@ def generate_launch_description():
                 "update_min_translation": LaunchConfiguration("update_min_translation"),
                 "update_min_rotation": LaunchConfiguration("update_min_rotation"),
                 "max_z_deviation": max_z_deviation,
+                "lost_tracking_reinit_count": lost_tracking_reinit_count,
+                "max_continuous_correction_translation": max_continuous_correction_translation,
+                "max_continuous_correction_rotation": max_continuous_correction_rotation,
+                "max_global_reinit_translation": max_global_reinit_translation,
+                "fallback_recovery_confidence": fallback_recovery_confidence,
+                "enable_initial_pose_fallback": enable_initial_pose_fallback,
+                "enable_initial_pose_preference": enable_initial_pose_preference,
+                "initial_pose_fallback_x": initial_pose_fallback_x,
+                "initial_pose_fallback_y": initial_pose_fallback_y,
+                "initial_pose_fallback_z": initial_pose_fallback_z,
+                "initial_pose_fallback_yaw": initial_pose_fallback_yaw,
+                "initial_pose_preference_x": initial_pose_preference_x,
+                "initial_pose_preference_y": initial_pose_preference_y,
+                "initial_pose_preference_score_ratio": initial_pose_preference_score_ratio,
                 "enable_court_crop": LaunchConfiguration("enable_court_crop"),
                 "court_crop_x_min": LaunchConfiguration("court_crop_x_min"),
                 "court_crop_x_max": LaunchConfiguration("court_crop_x_max"),
@@ -225,6 +295,20 @@ def generate_launch_description():
         declare_update_min_translation,
         declare_update_min_rotation,
         declare_max_z_deviation,
+        declare_lost_tracking_reinit_count,
+        declare_max_continuous_correction_translation,
+        declare_max_continuous_correction_rotation,
+        declare_max_global_reinit_translation,
+        declare_fallback_recovery_confidence,
+        declare_enable_initial_pose_fallback,
+        declare_enable_initial_pose_preference,
+        declare_initial_pose_fallback_x,
+        declare_initial_pose_fallback_y,
+        declare_initial_pose_fallback_z,
+        declare_initial_pose_fallback_yaw,
+        declare_initial_pose_preference_x,
+        declare_initial_pose_preference_y,
+        declare_initial_pose_preference_score_ratio,
         declare_enable_court_crop,
         declare_court_crop_x_min,
         declare_court_crop_x_max,

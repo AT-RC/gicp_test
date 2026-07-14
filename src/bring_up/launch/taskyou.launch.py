@@ -122,6 +122,20 @@ def generate_launch_description():
             'max_dist_sq': '9.0',
             'continuous_update_rate': '0.5',
             'max_z_deviation': '1.5',
+            'lost_tracking_reinit_count': '5',
+            'max_continuous_correction_translation': '1.0',
+            'max_continuous_correction_rotation': '0.35',
+            'max_global_reinit_translation': '1.0',
+            'fallback_recovery_confidence': '60.0',
+            'enable_initial_pose_fallback': 'true',
+            'enable_initial_pose_preference': 'true',
+            'initial_pose_fallback_x': '-0.4',
+            'initial_pose_fallback_y': '-2.0',
+            'initial_pose_fallback_z': '0.0',
+            'initial_pose_fallback_yaw': '0.0',
+            'initial_pose_preference_x': '-0.4',
+            'initial_pose_preference_y': '-2.0',
+            'initial_pose_preference_score_ratio': '2.0',
             'enable_court_crop': enable_court_crop
         }.items()
     )
